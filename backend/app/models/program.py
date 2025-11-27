@@ -96,11 +96,7 @@ class Program(BaseModel):
             INSERT INTO programs (program_code, program_name, college_code)
             VALUES (:program_code, :program_name, :college_code)
             """,
-            {
-                "program_code": self.program_code,
-                "program_name": self.program_name,
-                "college_code": self.college_code
-            }
+            {"program_code": self.program_code, "program_name": self.program_name, "college_code": self.college_code},
         )
         
         if not result:
@@ -114,42 +110,33 @@ class Program(BaseModel):
     def update(self, updates: Dict[str, Any]) -> 'Program':
         """Update program with new data."""
         allowed_fields = {"program_code", "program_name", "college_code"}
-        set_items = []
+        assignments: List[str] = []
         params = {"orig_program_code": self.program_code}
-        
-        # Validate updates
+
+        # Validate updates and prepare assignments
         for field, value in updates.items():
             if field not in allowed_fields:
                 continue
-            
-            if field == "program_code" and value != self.program_code:
-                # Check if new code already exists
-                if self._code_exists(value):
-                    raise ValidationError(
-                        f"Program code '{value}' already exists",
-                        error_code="PROGRAM_CODE_EXISTS"
-                    )
-            
-            if field == "college_code" and value != self.college_code:
-                # Validate new college exists
-                if not self._college_exists(value):
-                    raise ValidationError(
-                        f"College with code '{value}' does not exist",
-                        error_code="COLLEGE_NOT_FOUND"
-                    )
-            
-            set_items.append(f"{field} = :{field}")
+
+            if field == "program_code" and value != self.program_code and self._code_exists(value):
+                raise ValidationError(f"Program code '{value}' already exists", error_code="PROGRAM_CODE_EXISTS")
+
+            if field == "college_code" and value != self.college_code and not self._college_exists(value):
+                raise ValidationError(f"College with code '{value}' does not exist", error_code="COLLEGE_NOT_FOUND")
+
+            assignments.append(f"{field} = :{field}")
             params[field] = value
         
-        if not set_items:
+        # CORRECTED: Changed from "if not set_items:" to "if not assignments:"
+        if not assignments:
             raise ValidationError(
                 "No valid fields to update",
                 error_code="NO_UPDATE_FIELDS"
             )
         
         result = self._execute_query(
-            f"UPDATE programs SET {', '.join(set_items)} WHERE program_code = :orig_program_code",
-            params
+            f"UPDATE programs SET {', '.join(assignments)} WHERE program_code = :orig_program_code",
+            params,
         )
         
         if not result or result.rowcount == 0:
@@ -158,7 +145,7 @@ class Program(BaseModel):
                 error_code="PROGRAM_NOT_FOUND"
             )
         
-        # Update instance with new values
+        # Update instance fields
         for field, value in updates.items():
             if field in allowed_fields:
                 setattr(self, field, value)

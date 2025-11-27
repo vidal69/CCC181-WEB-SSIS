@@ -4,9 +4,9 @@ from typing import Dict, Any
 import logging
 import os
 import uuid
-from ..utils.route_utils import make_response
+from ..utils.format_response import format_response
 from ..supabase_client import supabase
-from ..services.student_service import (
+from ..controller.student_controller import (
     search_students,
     get_student,
     get_students_by_program,
@@ -27,7 +27,7 @@ def list_students_route():
             page = max(int(request.args.get("page", 1)), 1)
             page_size = max(min(int(request.args.get("page_size", 50)), 100), 1)
         except ValueError:
-            return make_response({
+            return format_response({
                 "status": "error", 
                 "message": "Invalid pagination parameters",
                 "error_code": "INVALID_PAGINATION"
@@ -48,7 +48,7 @@ def list_students_route():
         )
 
         if result["success"]:
-            return make_response({
+            return format_response({
                 "status": "success",
                 "message": result["message"],
                 "data": result["data"],
@@ -59,14 +59,14 @@ def list_students_route():
                 },
             }, 200)
         else:
-            return make_response({
+            return format_response({
                 "status": "error",
                 "message": result["message"],
                 "error_code": result["error_code"]
             }, 500)
     
     except Exception as e:
-        return make_response({
+        return format_response({
             "status": "error", 
             "message": f"Unexpected error occurred: {str(e)}",
             "error_code": "UNEXPECTED_ERROR"
@@ -81,7 +81,7 @@ def create_student_route():
         result = create_student(data)
         
         if result["success"]:
-            return make_response({
+            return format_response({
                 "status": "success",
                 "message": result["message"],
                 "data": result["data"]
@@ -95,7 +95,7 @@ def create_student_route():
             elif result["error_code"] == "DATABASE_ERROR":
                 status_code = 500
             
-            return make_response({
+            return format_response({
                 "status": "error",
                 "message": result["message"],
                 "error_code": result["error_code"],
@@ -103,7 +103,7 @@ def create_student_route():
             }, status_code)
             
     except Exception as e:
-        return make_response({
+        return format_response({
             "status": "error", 
             "message": f"Unexpected error occurred: {str(e)}",
             "error_code": "UNEXPECTED_ERROR"
@@ -117,7 +117,7 @@ def get_student_route(id_number: str):
         result = get_student(id_number)
         
         if result["success"]:
-            return make_response({
+            return format_response({
                 "status": "success",
                 "message": result["message"],
                 "data": result["data"]
@@ -127,14 +127,14 @@ def get_student_route(id_number: str):
             if result["error_code"] == "STUDENT_NOT_FOUND":
                 status_code = 404
             
-            return make_response({
+            return format_response({
                 "status": "error",
                 "message": result["message"],
                 "error_code": result["error_code"]
             }, status_code)
             
     except Exception as e:
-        return make_response({
+        return format_response({
             "status": "error", 
             "message": f"Unexpected error occurred: {str(e)}",
             "error_code": "UNEXPECTED_ERROR"
@@ -149,7 +149,7 @@ def update_student_route(id_number: str):
         result = update_student(id_number, updates)
         
         if result["success"]:
-            return make_response({
+            return format_response({
                 "status": "success",
                 "message": result["message"],
                 "data": result["data"]
@@ -165,7 +165,7 @@ def update_student_route(id_number: str):
             elif result["error_code"] == "DATABASE_ERROR":
                 status_code = 500
             
-            return make_response({
+            return format_response({
                 "status": "error",
                 "message": result["message"],
                 "error_code": result["error_code"],
@@ -173,7 +173,7 @@ def update_student_route(id_number: str):
             }, status_code)
             
     except Exception as e:
-        return make_response({
+        return format_response({
             "status": "error", 
             "message": f"Unexpected error occurred: {str(e)}",
             "error_code": "UNEXPECTED_ERROR"
@@ -187,7 +187,7 @@ def delete_student_route(id_number: str):
         result = delete_student(id_number)
         
         if result["success"]:
-            return make_response({
+            return format_response({
                 "status": "success",
                 "message": result["message"]
             }, 200)
@@ -198,7 +198,7 @@ def delete_student_route(id_number: str):
             elif result["error_code"] == "DATABASE_ERROR":
                 status_code = 500
             
-            return make_response({
+            return format_response({
                 "status": "error",
                 "message": result["message"],
                 "error_code": result["error_code"],
@@ -206,7 +206,7 @@ def delete_student_route(id_number: str):
             }, status_code)
             
     except Exception as e:
-        return make_response({
+        return format_response({
             "status": "error", 
             "message": f"Unexpected error occurred: {str(e)}",
             "error_code": "UNEXPECTED_ERROR"
@@ -223,7 +223,7 @@ def get_signed_upload_url(id_number: str):
         content_type = data.get("content_type", "image/jpeg")
 
         if not filename:
-            return make_response({
+            return format_response({
                 "status": "error",
                 "message": "Filename is required",
                 "error_code": "MISSING_FILENAME"
@@ -232,7 +232,7 @@ def get_signed_upload_url(id_number: str):
         # Validate content type
         allowed_types = ["image/jpeg", "image/png", "image/gif", "image/webp", "image/svg+xml"]
         if content_type not in allowed_types:
-            return make_response({
+            return format_response({
                 "status": "error",
                 "message": f"Invalid content type. Allowed: {', '.join(allowed_types)}",
                 "error_code": "INVALID_CONTENT_TYPE"
@@ -240,7 +240,7 @@ def get_signed_upload_url(id_number: str):
         
         student_result = get_student(id_number)
         if not student_result["success"]:
-            return make_response({
+            return format_response({
                 "status": "error",
                 "message": "Student not found",
                 "error_code": "STUDENT_NOT_FOUND"
@@ -254,21 +254,21 @@ def get_signed_upload_url(id_number: str):
         )
         
         if "error" in response or "statusCode" in response:
-            return make_response({
+            return format_response({
                 "status": "error",
                 "message": f"Failed to generate upload URL: {response}",
                 "error_code": "UPLOAD_URL_ERROR"
             }, 500)
             
         # Return direct data structure expected by frontend
-        return make_response({
+        return format_response({
             "upload_url": response.get("signedURL") or response.get("signedUrl"),
             "avatar_path": object_path,
             "expires_in": 3600
         }, 200)
         
     except Exception as e:
-        return make_response({
+        return format_response({
             "status": "error", 
             "message": f"Unexpected error occurred: {str(e)}",
             "error_code": "UNEXPECTED_ERROR"
@@ -284,7 +284,7 @@ def confirm_avatar_upload(id_number: str):
         avatar_path = data.get("avatar_path")
         
         if not avatar_path:
-            return make_response({
+            return format_response({
                 "status": "error",
                 "message": "Avatar path is required",
                 "error_code": "MISSING_AVATAR_PATH"
@@ -294,20 +294,20 @@ def confirm_avatar_upload(id_number: str):
         
         if result["success"]:
             # Return direct student data expected by frontend
-            return make_response(result["data"], 200)
+            return format_response(result["data"], 200)
         else:
             status_code = 400
             if result["error_code"] == "STUDENT_NOT_FOUND":
                 status_code = 404
             
-            return make_response({
+            return format_response({
                 "status": "error",
                 "message": result["message"],
                 "error_code": result["error_code"]
             }, status_code)
             
     except Exception as e:
-        return make_response({
+        return format_response({
             "status": "error", 
             "message": f"Unexpected error occurred: {str(e)}",
             "error_code": "UNEXPECTED_ERROR"
@@ -321,7 +321,7 @@ def get_avatar_url(id_number: str):
     try:
         student_result = get_student(id_number)
         if not student_result["success"]:
-            return make_response({
+            return format_response({
                 "status": "error",
                 "message": "Student not found",
                 "error_code": "STUDENT_NOT_FOUND"
@@ -332,7 +332,7 @@ def get_avatar_url(id_number: str):
         
         if not avatar_path:
             # Return structure expected by frontend
-            return make_response({"avatar_url": None}, 200)
+            return format_response({"avatar_url": None}, 200)
         
         # Generate signed URL for viewing (5 minute expiry)
         response = supabase.storage.from_(bucket).create_signed_url(
@@ -341,20 +341,81 @@ def get_avatar_url(id_number: str):
         )
         
         if hasattr(response, 'error') and response.error:
-            return make_response({
+            return format_response({
                 "status": "error",
                 "message": f"Failed to generate avatar URL: {response.error.message}",
                 "error_code": "AVATAR_URL_ERROR"
             }, 500)
         
         # Return direct data structure expected by frontend
-        return make_response({
+        return format_response({
             "avatar_url": response.get("signedURL") or response.get("signedUrl"),
             "expires_in": 300
         }, 200)
         
     except Exception as e:
-        return make_response({
+        return format_response({
+            "status": "error", 
+            "message": f"Unexpected error occurred: {str(e)}",
+            "error_code": "UNEXPECTED_ERROR"
+        }, 500)
+
+
+
+@bp.delete("/<id_number>/avatar")
+@jwt_required()
+def delete_avatar_route(id_number: str):
+    """Delete student avatar from storage and update student record"""
+    try:
+        student_result = get_student(id_number)
+        if not student_result["success"]:
+            return format_response({
+                "status": "error",
+                "message": "Student not found",
+                "error_code": "STUDENT_NOT_FOUND"
+            }, 404)
+        
+        student_data = student_result["data"]
+        avatar_path = student_data.get("photo_path")
+        
+        if not avatar_path:
+            return format_response({
+                "status": "success",
+                "message": "No avatar to delete"
+            }, 200)
+        
+        # Remove leading slash if present
+        if avatar_path.startswith('/'):
+            avatar_path = avatar_path[1:]
+        
+        # Delete from storage
+        response = supabase.storage.from_(bucket).remove([avatar_path])
+        
+        if hasattr(response, 'error') and response.error:
+            return format_response({
+                "status": "error",
+                "message": f"Failed to delete avatar from storage: {response.error.message}",
+                "error_code": "AVATAR_DELETE_ERROR"
+            }, 500)
+        
+        # Update student record to remove photo_path
+        result = update_student(id_number, {"photo_path": ""})
+        
+        if result["success"]:
+            return format_response({
+                "status": "success",
+                "message": "Avatar deleted successfully",
+                "data": result["data"]
+            }, 200)
+        else:
+            return format_response({
+                "status": "error",
+                "message": result["message"],
+                "error_code": result["error_code"]
+            }, 500)
+            
+    except Exception as e:
+        return format_response({
             "status": "error", 
             "message": f"Unexpected error occurred: {str(e)}",
             "error_code": "UNEXPECTED_ERROR"

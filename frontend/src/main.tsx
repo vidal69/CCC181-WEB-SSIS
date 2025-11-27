@@ -11,6 +11,8 @@ import Colleges from './pages/Colleges'
 import Demographics from './pages/Demographics'
 import Landing from './pages/Landing'
 import Home from './pages/Home'
+import Login from './pages/Login'
+import { AuthProvider, ProtectedRoute } from './auth'
 
 const router = createBrowserRouter([
   {
@@ -18,17 +20,20 @@ const router = createBrowserRouter([
     element: <App />,
     children: [
       { index: true, element: <Landing /> },
-      { path: 'home', element: <Home /> },
-      { path: 'students', element: <Students /> },
-      { path: 'programs', element: <Programs /> },
-      { path: 'colleges', element: <Colleges /> },
-      { path: 'demographics', element: <Demographics /> },
+      { path: 'login', element: <Login /> },
+      { path: 'home', element: <ProtectedRoute><Home /></ProtectedRoute> },
+      { path: 'students', element: <ProtectedRoute><Students /></ProtectedRoute> },
+      { path: 'programs', element: <ProtectedRoute><Programs /></ProtectedRoute> },
+      { path: 'colleges', element: <ProtectedRoute><Colleges /></ProtectedRoute> },
+      { path: 'demographics', element: <ProtectedRoute><Demographics /></ProtectedRoute> },
     ],
   },
 ])
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <RouterProvider router={router} />
+    <AuthProvider>
+      <RouterProvider router={router} />
+    </AuthProvider>
   </StrictMode>,
 )

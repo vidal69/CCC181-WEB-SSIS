@@ -31,9 +31,9 @@ db_name = os.getenv("DB_NAME", "ssis_web")
 env = os.environ.copy()
 env["PGPASSWORD"] = db_password
 
-base_dir = Path(__file__).parent.parent
-setup_sql = base_dir / "scripts" / "setup.sql"
-schema_sql = base_dir / "app" / "db" / "schema.sql"
+db_dir = Path(__file__).parent 
+setup_sql = db_dir / "setup.sql"
+schema_sql = db_dir / "schema.sql"
 
 # 1. System setup (run on default 'postgres' db)
 subprocess.run([

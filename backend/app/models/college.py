@@ -70,10 +70,7 @@ class College(BaseModel):
         
         # Check for duplicate college code
         if self._code_exists(self.college_code):
-            raise ValidationError(
-                f"College code '{self.college_code}' already exists",
-                error_code="COLLEGE_CODE_EXISTS"
-            )
+            raise ValidationError(f"College code '{self.college_code}' already exists", error_code="COLLEGE_CODE_EXISTS")
         
         result = self._execute_query(
             """
@@ -97,34 +94,30 @@ class College(BaseModel):
     def update(self, updates: Dict[str, Any]) -> 'College':
         """Update college with new data."""
         allowed_fields = {"college_code", "college_name"}
-        set_items = []
+        assignments: List[str] = []
         params = {"orig_college_code": self.college_code}
-        
-        # Validate updates
+
+        # Validate updates and prepare assignments
         for field, value in updates.items():
             if field not in allowed_fields:
                 continue
-            
-            if field == "college_code" and value != self.college_code:
-                # Check if new code already exists
-                if self._code_exists(value):
-                    raise ValidationError(
-                        f"College code '{value}' already exists",
-                        error_code="COLLEGE_CODE_EXISTS"
-                    )
-            
-            set_items.append(f"{field} = :{field}")
+
+            if field == "college_code" and value != self.college_code and self._code_exists(value):
+                raise ValidationError(f"College code '{value}' already exists", error_code="COLLEGE_CODE_EXISTS")
+
+            assignments.append(f"{field} = :{field}")
             params[field] = value
         
-        if not set_items:
+        # Fix: Check if assignments list is empty (not set_items)
+        if not assignments:
             raise ValidationError(
                 "No valid fields to update",
                 error_code="NO_UPDATE_FIELDS"
             )
         
         result = self._execute_query(
-            f"UPDATE colleges SET {', '.join(set_items)} WHERE college_code = :orig_college_code",
-            params
+            f"UPDATE colleges SET {', '.join(assignments)} WHERE college_code = :orig_college_code",
+            params,
         )
         
         if not result or result.rowcount == 0:
@@ -133,7 +126,7 @@ class College(BaseModel):
                 error_code="COLLEGE_NOT_FOUND"
             )
         
-        # Update instance with new values
+        # Apply updates to this instance
         for field, value in updates.items():
             if field in allowed_fields:
                 setattr(self, field, value)

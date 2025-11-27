@@ -1,8 +1,8 @@
 from flask import Blueprint, request
 from flask_jwt_extended import jwt_required
 from typing import Dict, Any
-from ..utils.route_utils import make_response
-from ..services.colleges_service import (
+from ..utils.format_response import format_response
+from ..controller.colleges_controller import (
     search_colleges,
     get_college,
     get_all_colleges,
@@ -14,6 +14,24 @@ from ..services.colleges_service import (
 bp = Blueprint("colleges", __name__)
 
 
+def _ok(message, data=None, status=200, meta=None):
+    payload = {"status": "success", "message": message}
+    if data is not None:
+        payload["data"] = data
+    if meta is not None:
+        payload["meta"] = meta
+    return format_response(payload, status)
+
+
+def _err(message, error_code=None, status=400, details=None):
+    payload = {"status": "error", "message": message}
+    if error_code:
+        payload["error_code"] = error_code
+    if details:
+        payload["details"] = details
+    return format_response(payload, status)
+
+
 @bp.get("/")
 @jwt_required()
 def list_colleges():
@@ -22,7 +40,7 @@ def list_colleges():
             page = max(int(request.args.get("page", 1)), 1)
             page_size = max(min(int(request.args.get("page_size", 50)), 100), 1)
         except ValueError:
-            return make_response({
+            return format_response({
                 "status": "error", 
                 "message": "Invalid pagination parameters",
                 "error_code": "INVALID_PAGINATION"
@@ -43,25 +61,13 @@ def list_colleges():
         )
 
         if result["success"]:
-            return make_response({
-                "status": "success",
-                "message": result["message"],
-                "data": result["data"],
-                "meta": {
-                    "page": result["page"], 
-                    "per_page": result["page_size"], 
-                    "total": result["total_count"]
-                },
-            }, 200)
+            meta = {"page": result["page"], "per_page": result["page_size"], "total": result["total_count"]}
+            return _ok(result["message"], data=result["data"], status=200, meta=meta)
         else:
-            return make_response({
-                "status": "error",
-                "message": result["message"],
-                "error_code": result["error_code"]
-            }, 500)
+            return _err(result["message"], error_code=result.get("error_code"), status=500)
 
     except Exception as e:
-        return make_response({
+        return format_response({
             "status": "error", 
             "message": f"Unexpected error occurred: {str(e)}",
             "error_code": "UNEXPECTED_ERROR"
@@ -76,27 +82,22 @@ def create_college_route():
         result = create_college(data)
         
         if result["success"]:
-            return make_response({
-                "status": "success",
-                "message": result["message"],
-                "data": result["data"]
-            }, 201)
+            return _ok(result["message"], data=result["data"], status=201)
         else:
             status_code = 400
             if result["error_code"] == "COLLEGE_CODE_EXISTS":
                 status_code = 409  # Conflict
             elif result["error_code"] == "DATABASE_ERROR":
                 status_code = 500
-            
-            return make_response({
-                "status": "error",
-                "message": result["message"],
-                "error_code": result["error_code"],
-                "details": result.get("details", {})
-            }, status_code)
+            return _err(
+                result["message"],
+                error_code=result.get("error_code"),
+                status=status_code,
+                details=result.get("details", {}),
+            )
             
     except Exception as e:
-        return make_response({
+        return format_response({
             "status": "error", 
             "message": f"Unexpected error occurred: {str(e)}",
             "error_code": "UNEXPECTED_ERROR"
@@ -111,11 +112,7 @@ def update_college_route(college_code: str):
         result = update_college(college_code, updates)
         
         if result["success"]:
-            return make_response({
-                "status": "success",
-                "message": result["message"],
-                "data": result["data"]
-            }, 200)
+            return _ok(result["message"], data=result["data"], status=200)
         else:
             status_code = 400
             if result["error_code"] == "COLLEGE_NOT_FOUND":
@@ -124,16 +121,15 @@ def update_college_route(college_code: str):
                 status_code = 409  # Conflict
             elif result["error_code"] == "DATABASE_ERROR":
                 status_code = 500
-            
-            return make_response({
-                "status": "error",
-                "message": result["message"],
-                "error_code": result["error_code"],
-                "details": result.get("details", {})
-            }, status_code)
+            return _err(
+                result["message"],
+                error_code=result.get("error_code"),
+                status=status_code,
+                details=result.get("details", {}),
+            )
             
     except Exception as e:
-        return make_response({
+        return format_response({
             "status": "error", 
             "message": f"Unexpected error occurred: {str(e)}",
             "error_code": "UNEXPECTED_ERROR"
@@ -147,10 +143,7 @@ def delete_college_route(college_code: str):
         result = delete_college(college_code)
         
         if result["success"]:
-            return make_response({
-                "status": "success",
-                "message": result["message"]
-            }, 200)
+            return _ok(result["message"], status=200)
         else:
             status_code = 400
             if result["error_code"] == "COLLEGE_NOT_FOUND":
@@ -159,16 +152,15 @@ def delete_college_route(college_code: str):
                 status_code = 409  # Conflict
             elif result["error_code"] == "DATABASE_ERROR":
                 status_code = 500
-            
-            return make_response({
-                "status": "error",
-                "message": result["message"],
-                "error_code": result["error_code"],
-                "details": result.get("details", {})
-            }, status_code)
+            return _err(
+                result["message"],
+                error_code=result.get("error_code"),
+                status=status_code,
+                details=result.get("details", {}),
+            )
             
     except Exception as e:
-        return make_response({
+        return format_response({
             "status": "error", 
             "message": f"Unexpected error occurred: {str(e)}",
             "error_code": "UNEXPECTED_ERROR"

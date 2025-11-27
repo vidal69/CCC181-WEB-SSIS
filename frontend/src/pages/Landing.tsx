@@ -11,7 +11,7 @@ export default function Landing() {
           Manage Colleges, Programs, and Students with clean tables and quick search.
         </p>
         <div className="d-flex gap-3 justify-content-center flex-wrap animate-fade-in" style={{ animationDelay: '0.4s' }}>
-          <Link to="/home" className="btn landing-cta btn-lg px-4">
+          <Link to="/login" className="btn landing-cta btn-lg px-4">
             Log in
           </Link>
         </div>

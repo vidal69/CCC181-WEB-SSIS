@@ -2,7 +2,7 @@
 User model for authentication and user management.
 """
 from typing import Dict, Any, Optional
-from werkzeug.security import generate_password_hash, check_password_hash
+from werkzeug.security import check_password_hash, generate_password_hash
 from .base_model import BaseModel, ValidationError, DatabaseError, NotFoundError
 
 
@@ -178,29 +178,31 @@ class User(BaseModel):
         
         return bool(result and result.rowcount > 0)
     
+    def _exists_query(self, query: str, params: Dict[str, Any]) -> bool:
+        """Helper to run a lightweight EXISTS-style query and return boolean."""
+        result = self._execute_query(query, params)
+        try:
+            return result.scalar() is not None
+        except Exception:
+            return False
+
     def _username_exists(self, username: str, exclude_user_id: Optional[int] = None) -> bool:
         """Check if username already exists."""
         query = "SELECT 1 FROM users WHERE username = :username"
-        params = {"username": username}
-        
+        params: Dict[str, Any] = {"username": username}
         if exclude_user_id:
             query += " AND user_id != :user_id"
             params["user_id"] = exclude_user_id
-        
-        result = self._execute_query(query, params)
-        return result.scalar() is not None
-    
+        return self._exists_query(query, params)
+
     def _email_exists(self, email: str, exclude_user_id: Optional[int] = None) -> bool:
         """Check if email already exists."""
         query = "SELECT 1 FROM users WHERE email = :email"
-        params = {"email": email}
-        
+        params: Dict[str, Any] = {"email": email}
         if exclude_user_id:
             query += " AND user_id != :user_id"
             params["user_id"] = exclude_user_id
-        
-        result = self._execute_query(query, params)
-        return result.scalar() is not None
+        return self._exists_query(query, params)
     
     @classmethod
     def find_by_email(cls, email: str) -> Optional['User']:

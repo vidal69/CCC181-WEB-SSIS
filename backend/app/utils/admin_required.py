@@ -1,5 +1,5 @@
 from flask_jwt_extended import get_jwt_identity
-from ..utils.route_utils import make_response
+from .format_response import format_response
 from ..models import User
 
 def admin_required(func):
@@ -12,7 +12,7 @@ def admin_required(func):
         user = User.find_by_id(current_user_id)
 
         if not user or user.role != "admin":
-            return make_response({
+            return format_response({
                 "status": "error",
                 "message": "Admin privileges required",
                 "error_code": "UNAUTHORIZED_ACCESS"

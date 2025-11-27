@@ -3,14 +3,16 @@ Student model for student management.
 """
 from typing import Dict, Any, List, Optional, Tuple
 from .base_model import BaseModel, ValidationError, DatabaseError, NotFoundError
-from ..utils.validation_utils import _valid_id_number
+from ..utils.validation import _valid_id_number
+from ..supabase_client import supabase  # Add this import
+import os  # Add this import
 
 
 class Student(BaseModel):
     """Student model for student management."""
     
     ALLOWED_GENDERS = {"MALE", "FEMALE", "OTHER"}
-    
+    BUCKET_NAME = os.environ.get("SUPABASE_BUCKET_NAME", "ssis_web_bucket")  # Add bucket name
     def __init__(self, id_number: str = "", first_name: str = "", last_name: str = "", 
                  year_level: Optional[int] = None, gender: str = "", program_code: str = "",
                  photo_path: str = ""):
@@ -155,6 +157,9 @@ class Student(BaseModel):
         set_items = []
         params = {"orig_id_number": self.id_number}
         
+        # Store original photo path before updates
+        original_photo_path = self.photo_path
+        
         # Validate updates
         for field, value in updates.items():
             if field not in allowed_fields:
@@ -216,6 +221,15 @@ class Student(BaseModel):
                 error_code="STUDENT_NOT_FOUND"
             )
         
+        # Handle photo cleanup if photo_path is being updated or cleared
+        if "photo_path" in updates:
+            new_photo_path = updates.get("photo_path")
+            
+            # If we have an original photo and it's being changed or removed, delete it
+            if original_photo_path and original_photo_path.strip():
+                if not new_photo_path or new_photo_path != original_photo_path:
+                    self._delete_photo_from_storage(original_photo_path)
+        
         # Update instance with new values
         for field, value in updates.items():
             if field in allowed_fields:
@@ -230,6 +244,10 @@ class Student(BaseModel):
                 "Cannot delete student without ID number",
                 error_code="NO_ID_NUMBER"
             )
+        
+        # Delete photo from storage before deleting student record
+        if self.photo_path and self.photo_path.strip():
+            self._delete_photo_from_storage(self.photo_path)
         
         result = self._execute_query(
             "DELETE FROM students WHERE id_number = :id_number",
@@ -253,6 +271,34 @@ class Student(BaseModel):
             {"program_code": program_code}
         )
         return result.scalar() is not None
+    
+    def _delete_photo_from_storage(self, photo_path: str) -> bool:
+        """Delete photo from Supabase storage."""
+        try:
+            if not photo_path or not photo_path.strip():
+                return True
+            
+            # Remove leading slash if present
+            if photo_path.startswith('/'):
+                photo_path = photo_path[1:]
+            
+            response = supabase.storage.from_(self.BUCKET_NAME).remove([photo_path])
+            
+            # Check if deletion was successful
+            if hasattr(response, 'error') and response.error:
+                # Log the error but don't fail the operation
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.warning(f"Failed to delete photo from storage: {response.error.message}")
+                return False
+            
+            return True
+        except Exception as e:
+            # Log the error but don't fail the operation
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.warning(f"Error deleting photo from storage: {str(e)}")
+            return False
     
     @classmethod
     def find_by_id(cls, id_number: str) -> Optional['Student']:

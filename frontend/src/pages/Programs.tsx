@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { listPrograms, createProgram, updateProgram, deleteProgram } from '../api/programs'
+import { listColleges } from '../api/colleges'
 
 type Program = {
   programCode: string
@@ -6,20 +8,42 @@ type Program = {
   collegeCode: string
 }
 
+type College = {
+  collegeCode: string
+  collegeName: string
+}
+
 type SortKey = keyof Program
 type SortDirection = 'asc' | 'desc'
 
 const PAGE_SIZE = 50
-const COLLEGE_OPTIONS = ['Engineering', 'Science', 'Business']
 
-function compareValues(a: unknown, b: unknown, dir: SortDirection): number {
-  if (a === b) return 0
-  const res = a! < b! ? -1 : 1
-  return dir === 'asc' ? res : -res
+// Define a type for API errors
+type ApiError = {
+  message: string
+  response?: {
+    data?: {
+      message?: string
+    }
+  }
+}
+
+function validateProgramDraft(draft: Partial<Program>): string[] {
+  const errors: string[] = []
+  if (!draft.programCode) errors.push('Program Code is required.')
+  if (!draft.programName) errors.push('Program Name is required.')
+  if (!draft.collegeCode) errors.push('College is required.')
+  return errors
 }
 
 export default function ProgramManager() {
+  const [colleges, setColleges] = useState<College[]>([])
   const [programs, setPrograms] = useState<Program[]>([])
+  const [meta, setMeta] = useState<{ page: number; per_page: number; total: number } | null>(null)
+  
+  // Keep track of display names for UI
+  const [collegeDisplayNames, setCollegeDisplayNames] = useState<Record<string, string>>({})
+
   const [draft, setDraft] = useState<Partial<Program>>({
     programCode: '',
     programName: '',
@@ -29,36 +53,112 @@ export default function ProgramManager() {
 
   const [searchField, setSearchField] = useState<SortKey>('programCode')
   const [searchQuery, setSearchQuery] = useState('')
+  const [filterCollege, setFilterCollege] = useState('')
+
   const [sortKey, setSortKey] = useState<SortKey>('programCode')
   const [sortDir, setSortDir] = useState<SortDirection>('asc')
-
   const [page, setPage] = useState(1)
 
   const leftColRef = useRef<HTMLDivElement | null>(null)
   const [tableMaxHeight, setTableMaxHeight] = useState<number | null>(null)
 
-  const processedPrograms = useMemo(() => {
-    const filtered = programs.filter(p => {
-      if (!searchQuery) return true
-      const value = String(p[searchField] ?? '').toLowerCase()
-      return value.includes(searchQuery.toLowerCase())
-    })
-    return [...filtered].sort((a, b) => compareValues(a[sortKey], b[sortKey], sortDir))
-  }, [programs, searchQuery, searchField, sortKey, sortDir])
-
-  const totalPages = Math.max(1, Math.ceil(processedPrograms.length / PAGE_SIZE))
-  const pageClamped = Math.min(Math.max(1, page), totalPages)
-  const paginated = processedPrograms.slice((pageClamped - 1) * PAGE_SIZE, pageClamped * PAGE_SIZE)
-
+  // Load colleges from API
   useEffect(() => {
-    if (page !== pageClamped) setPage(pageClamped)
-  }, [pageClamped])
+    async function loadColleges() {
+      try {
+        const collegesResp = await listColleges({ page_size: 1000 })
+        const collegesList = collegesResp.data
+        setColleges(collegesList)
 
-  function handleSelectRow(idx: number) {
-    const absoluteIndex = (pageClamped - 1) * PAGE_SIZE + idx
-    const p = processedPrograms[absoluteIndex]
+        // Create mapping of college codes to names for display
+        const collegeNameMap: Record<string, string> = {}
+        collegesList.forEach(college => {
+          collegeNameMap[college.collegeCode] = college.collegeName
+        })
+        setCollegeDisplayNames(collegeNameMap)
+
+      } catch (err) {
+        console.error('Failed to load colleges', err)
+        const error = err as ApiError
+        alert(error?.message || 'Failed to load colleges')
+      }
+    }
+    
+    loadColleges()
+  }, [])
+
+  // College options for dropdown (using names for display)
+  const collegeOptions = useMemo(() => 
+    colleges.map(c => ({
+      code: c.collegeCode,
+      name: c.collegeName
+    })).sort((a, b) => a.name.localeCompare(b.name)), 
+    [colleges]
+  )
+
+  // For filter dropdowns
+  const filterCollegeOptions = useMemo(() => 
+    [{ code: '', name: 'All' }, ...collegeOptions], 
+    [collegeOptions]
+  )
+
+  // Server-driven listing
+  const totalPages = Math.max(1, Math.ceil((meta?.total || 0) / PAGE_SIZE))
+  const pageClamped = Math.min(Math.max(1, page), totalPages)
+
+  // Map frontend sort/search fields to server column names
+  const fieldToServer: Record<string, string> = {
+    programCode: 'program_code',
+    programName: 'program_name',
+    collegeCode: 'college_code',
+  }
+
+  // Function to refresh program list
+  const refreshProgramList = async () => {
+    try {
+      const params: Record<string, any> = {
+        page: pageClamped,
+        page_size: PAGE_SIZE,
+        sort_by: fieldToServer[sortKey],
+        sort_order: sortDir === 'asc' ? 'ASC' : 'DESC',
+      }
+      if (searchQuery) {
+        params.q = searchQuery
+        params.search_by = fieldToServer[searchField]
+      }
+      if (filterCollege) {
+        params.college_code = filterCollege
+      }
+      
+      const res = await listPrograms(params)
+      
+      // The API response from listPrograms is already converted to camelCase
+      const programList: Program[] = res.data.map((p: any) => ({
+        programCode: p.programCode,
+        programName: p.programName,
+        collegeCode: p.collegeCode
+      }))
+      
+      setPrograms(programList)
+      setMeta(res.meta)
+    } catch (err) {
+      console.error('Failed to list programs', err)
+      const error = err as ApiError
+      alert(error?.message || 'Failed to load programs')
+    }
+  }
+
+  // Fetch list from server whenever relevant params change
+  useEffect(() => {
+    refreshProgramList()
+  }, [page, sortKey, sortDir, searchField, searchQuery, filterCollege])
+
+  function handleSelectRow(indexOnPage: number) {
+    const p = programs[indexOnPage]
     if (!p) return
-    setSelectedRowIndex(absoluteIndex)
+    console.log('Selected program:', p)
+    
+    setSelectedRowIndex(indexOnPage)
     setDraft({ ...p })
   }
 
@@ -67,40 +167,107 @@ export default function ProgramManager() {
     setDraft({ programCode: '', programName: '', collegeCode: '' })
   }
 
-  function onAdd() {
-    if (!draft.programCode || !draft.programName || !draft.collegeCode) {
-      alert('Program Code, Program Name, and College Code are required.')
+  async function onAdd() {
+    const errors = validateProgramDraft(draft)
+    if (errors.length) {
+      alert(errors.join('\n'))
       return
     }
-    if (programs.some(p => p.programCode === draft.programCode)) {
-      alert('Program code already exists.')
-      return
+    
+    try {
+      const programToCreate = {
+        programCode: draft.programCode!,
+        programName: draft.programName!,
+        collegeCode: draft.collegeCode!
+      }
+      
+      await createProgram(programToCreate)
+      alert('Program created successfully!')
+      
+      await refreshProgramList()
+      clearForm()
+      
+    } catch (err: unknown) {
+      const error = err as ApiError
+      const errorMessage = error?.message || error?.response?.data?.message || 'Failed to create program'
+      alert(errorMessage)
+      console.error('Create program error:', err)
     }
-    setPrograms(prev => [...prev, draft as Program])
-    clearForm()
   }
 
-  function onUpdate() {
+  async function onUpdate() {
     if (selectedRowIndex === null) {
-      alert('Select a program to update.')
+      alert('Select a program row to update.')
       return
     }
-    if (!draft.programCode || !draft.programName || !draft.collegeCode) {
-      alert('Program Code, Program Name, and College Code are required.')
+    
+    const errors = validateProgramDraft(draft)
+    if (errors.length) {
+      alert(errors.join('\n'))
       return
     }
-    setPrograms(prev => prev.map((p, i) => (i === selectedRowIndex ? (draft as Program) : p)))
-    clearForm()
+    
+    try {
+      const orig = programs[selectedRowIndex]
+      console.log('Original program:', orig)
+      console.log('Draft updates:', draft)
+      
+      // Prepare update payload - only include changed fields
+      const updates: Partial<Program> = {}
+      if (draft.programCode && draft.programCode !== orig.programCode) updates.programCode = draft.programCode
+      if (draft.programName && draft.programName !== orig.programName) updates.programName = draft.programName
+      if (draft.collegeCode && draft.collegeCode !== orig.collegeCode) {
+        console.log('College changed from', orig.collegeCode, 'to', draft.collegeCode)
+        updates.collegeCode = draft.collegeCode
+      }
+      
+      console.log('Updates to send:', updates)
+      
+      if (Object.keys(updates).length === 0) {
+        alert('No changes to update')
+        return
+      }
+      
+      await updateProgram(orig.programCode, updates)
+      alert('Program updated successfully!')
+      
+      await refreshProgramList()
+      clearForm()
+      
+    } catch (err: unknown) {
+      const error = err as ApiError
+      const errorMessage = error?.message || error?.response?.data?.message || 'Failed to update program'
+      alert(errorMessage)
+      console.error('Update program error:', err)
+    }
   }
 
-  function onDelete() {
+  async function onDelete() {
     if (selectedRowIndex === null) {
-      alert('Select a program to delete.')
+      alert('Select a program row to delete.')
       return
     }
-    if (!confirm('Delete this program?')) return
-    setPrograms(prev => prev.filter((_, i) => i !== selectedRowIndex))
-    clearForm()
+    
+    if (!confirm('Are you sure you want to delete this program?')) return
+    
+    try {
+      const orig = programs[selectedRowIndex]
+      await deleteProgram(orig.programCode)
+      alert('Program deleted successfully!')
+      
+      await refreshProgramList()
+      clearForm()
+      
+    } catch (err: unknown) {
+      const error = err as ApiError
+      const errorMessage = error?.message || error?.response?.data?.message || 'Failed to delete program'
+      alert(errorMessage)
+      console.error('Delete program error:', err)
+    }
+  }
+
+  function onRefresh() {
+    refreshProgramList()
   }
 
   function toggleSort(key: SortKey) {
@@ -111,9 +278,10 @@ export default function ProgramManager() {
     }
   }
 
-  function onRefresh() {
-    setPage(1)
-  }
+  const canSubmit = validateProgramDraft(draft).length === 0
+  const hasSelectedProgram = selectedRowIndex !== null
+
+  // REMOVED THE DUPLICATE DECLARATIONS HERE
 
   useEffect(() => {
     function syncHeights() {
@@ -123,7 +291,15 @@ export default function ProgramManager() {
     syncHeights()
     window.addEventListener('resize', syncHeights)
     return () => window.removeEventListener('resize', syncHeights)
-  }, [draft, searchField, searchQuery, paginated.length])
+  }, [draft, searchField, searchQuery, filterCollege, programs.length])
+
+  // Filter programs based on college filter
+  const filteredPrograms = useMemo(() => {
+    return programs.filter(p => {
+      if (filterCollege && p.collegeCode !== filterCollege) return false
+      return true
+    })
+  }, [programs, filterCollege])
 
   return (
     <div>
@@ -135,14 +311,26 @@ export default function ProgramManager() {
           
           <div className="card frosted-glass mb-3">
             <div className="card-body">
-              <label className="form-label">Search by</label>
-              <div className="input-group">
-                <select className="form-select" style={{ maxWidth: 180 }} value={searchField} onChange={e => setSearchField(e.target.value as SortKey)}>
-                  <option value="programCode">Program Code</option>
-                  <option value="programName">Program Name</option>
-                  <option value="collegeCode">College Code</option>
-                </select>
-                <input className="form-control" value={searchQuery} onChange={e => setSearchQuery(e.target.value)} />
+              <div className="row g-3 align-items-end">
+                <div className="col-12">
+                  <label className="form-label">Search by</label>
+                  <div className="input-group">
+                    <select className="form-select" style={{ maxWidth: 180 }} value={searchField} onChange={e => setSearchField(e.target.value as SortKey)}>
+                      <option value="programCode">Program Code</option>
+                      <option value="programName">Program Name</option>
+                      <option value="collegeCode">College Code</option>
+                    </select>
+                    <input className="form-control" value={searchQuery} onChange={e => setSearchQuery(e.target.value)} />
+                  </div>
+                </div>
+                <div className="col-12">
+                  <label className="form-label">Filter College</label>
+                  <select className="form-select" value={filterCollege} onChange={e => setFilterCollege(e.target.value)}>
+                    {filterCollegeOptions.map(option => 
+                      <option key={option.code} value={option.code}>{option.name}</option>
+                    )}
+                  </select>
+                </div>
               </div>
             </div>
           </div>
@@ -160,20 +348,68 @@ export default function ProgramManager() {
                   <input className="form-control" value={draft.programName || ''} onChange={e => setDraft(prev => ({ ...prev, programName: e.target.value }))} />
                 </div>
                 <div className="col-12">
-                  <label className="form-label">College Code</label>
+                  <label className="form-label">College</label>
                   <select className="form-select" value={draft.collegeCode || ''} onChange={e => setDraft(prev => ({ ...prev, collegeCode: e.target.value }))}>
                     <option value="">Select</option>
-                    {COLLEGE_OPTIONS.map(c => (
-                      <option key={c} value={c}>{c}</option>
-                    ))}
+                    {collegeOptions.map(c => <option key={c.code} value={c.code}>{c.name}</option>)}
                   </select>
+                  {draft.collegeCode && (
+                    <div className="form-text small">
+                      Selected: {collegeDisplayNames[draft.collegeCode] || draft.collegeCode}
+                    </div>
+                  )}
                 </div>
+                
+                {/* Action Buttons */}
                 <div className="col-12 d-flex gap-2 flex-wrap">
-                  <button className="btn btn-primary" onClick={onAdd}>Add</button>
-                  <button className="btn btn-warning" onClick={onUpdate} disabled={selectedRowIndex === null}>Update</button>
-                  <button className="btn btn-danger" onClick={onDelete} disabled={selectedRowIndex === null}>Delete</button>
-                  <button className="btn btn-outline-secondary" onClick={clearForm}>Clear</button>
-                  <button className="btn btn-outline-success" onClick={onRefresh}>Refresh</button>
+                  <button 
+                    className="btn btn-primary" 
+                    onClick={onAdd} 
+                    disabled={!canSubmit}
+                  >
+                    Add
+                  </button>
+                  <button 
+                    className="btn btn-warning" 
+                    onClick={onUpdate} 
+                    disabled={selectedRowIndex === null || !canSubmit}
+                  >
+                    Update
+                  </button>
+                  <button 
+                    className="btn btn-danger" 
+                    onClick={onDelete} 
+                    disabled={selectedRowIndex === null}
+                  >
+                    Delete
+                  </button>
+                  <button 
+                    className="btn btn-outline-secondary" 
+                    onClick={clearForm}
+                  >
+                    Clear
+                  </button>
+                  <button 
+                    className="btn btn-outline-success" 
+                    onClick={onRefresh}
+                  >
+                    <i className="bi bi-arrow-clockwise me-1"></i>
+                    Refresh
+                  </button>
+                </div>
+                
+                {/* Status Messages */}
+                <div className="col-12">
+                  {hasSelectedProgram && (
+                    <div className="alert alert-info py-2 mt-2 small">
+                      <div className="d-flex align-items-center">
+                        <i className="bi bi-book me-2"></i>
+                        <div>
+                          Editing: <strong>{draft.programName}</strong>
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
@@ -190,9 +426,15 @@ export default function ProgramManager() {
                     {(['programCode','programName','collegeCode'] as SortKey[]).map(col => (
                       <th key={col} role="button" onClick={() => toggleSort(col)}>
                         <div className="d-flex align-items-center">
-                          <span className="me-1 text-capitalize">{col}</span>
+                          <span className="me-1 text-capitalize">
+                            {col === 'programCode' ? 'Program Code' : 
+                             col === 'programName' ? 'Program Name' : 
+                             'College Code'}
+                          </span>
                           {sortKey === col && (
-                            <span>{sortDir === 'asc' ? '▲' : '▼'}</span>
+                            <span aria-label={sortDir === 'asc' ? 'ascending' : 'descending'}>
+                              {sortDir === 'asc' ? '▲' : '▼'}
+                            </span>
                           )}
                         </div>
                       </th>
@@ -200,19 +442,23 @@ export default function ProgramManager() {
                   </tr>
                 </thead>
                 <tbody>
-                  {paginated.map((p, idx) => (
+                  {filteredPrograms.map((p, idx) => (
                     <tr key={p.programCode} 
-                        className={selectedRowIndex === ((pageClamped - 1) * PAGE_SIZE + idx) ? 'table-primary' : ''} 
+                        className={selectedRowIndex === idx ? 'table-primary' : ''} 
                         onClick={() => handleSelectRow(idx)} 
                         style={{ cursor: 'pointer' }}>
                       <td>{p.programCode}</td>
                       <td>{p.programName}</td>
+                      {/* Show College Code instead of College Name */}
                       <td>{p.collegeCode}</td>
                     </tr>
                   ))}
-                  {paginated.length === 0 && (
+                  {filteredPrograms.length === 0 && (
                     <tr>
-                      <td colSpan={3} className="text-center text-muted py-4">No programs to display.</td>
+                      <td colSpan={3} className="text-center text-muted py-4">
+                        <i className="bi bi-book display-6 d-block mb-2"></i>
+                        No programs to display.
+                      </td>
                     </tr>
                   )}
                 </tbody>
@@ -221,16 +467,33 @@ export default function ProgramManager() {
 
             
             <div className="d-flex align-items-center justify-content-between p-3 border-top">
-              <div>Showing {paginated.length} of {processedPrograms.length} programs</div>
+              <div>Showing {filteredPrograms.length} of {meta?.total ?? 0} programs</div>
               <div className="d-flex align-items-center gap-2">
-                <button className="btn btn-outline-secondary" onClick={() => setPage(p => Math.max(1, p - 1))} disabled={pageClamped === 1}>Prev</button>
+                <button 
+                  className="btn btn-outline-secondary" 
+                  onClick={() => setPage(p => Math.max(1, p - 1))} 
+                  disabled={pageClamped === 1}
+                >
+                  Prev
+                </button>
                 <span>Page</span>
-                <input style={{ width: 80 }} className="form-control" value={String(pageClamped)} onChange={e => {
-                  const n = Number(e.target.value)
-                  setPage(Number.isFinite(n) ? n : pageClamped)
-                }} />
+                <input 
+                  style={{ width: 80 }} 
+                  className="form-control" 
+                  value={String(pageClamped)} 
+                  onChange={e => {
+                    const n = Number(e.target.value)
+                    setPage(Number.isFinite(n) ? n : pageClamped)
+                  }} 
+                />
                 <span>of {totalPages}</span>
-                <button className="btn btn-outline-secondary" onClick={() => setPage(p => Math.min(totalPages, p + 1))} disabled={pageClamped === totalPages}>Next</button>
+                <button 
+                  className="btn btn-outline-secondary" 
+                  onClick={() => setPage(p => Math.min(totalPages, p + 1))} 
+                  disabled={pageClamped === totalPages}
+                >
+                  Next
+                </button>
               </div>
             </div>
           </div>
