@@ -38,6 +38,10 @@ def list_students_route():
         search_term = request.args.get("q", "")
         search_by = request.args.get("search_by", "")
 
+        gender = request.args.get("gender", "")
+        year_level = request.args.get("year_level", "")
+        program_code = request.args.get("program_code", "")
+
         result = search_students(
             sort_by=sort_by,
             sort_order=sort_order,
@@ -45,6 +49,9 @@ def list_students_route():
             search_by=search_by,
             page=page,
             page_size=page_size,
+            gender=gender if gender else None,
+            year_level=year_level if year_level else None,
+            program_code=program_code if program_code else None,
         )
 
         if result["success"]:

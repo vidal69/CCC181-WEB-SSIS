@@ -2,6 +2,7 @@ from typing import Dict, Any, List, Tuple, Optional
 from ..models import Student
 from ..models.base_model import ValidationError, DatabaseError
 from ..utils.validation import _valid_id_number
+from ..supabase_client import supabase
 
 
 def _ok(message: str = "", *, data: Any = None, **meta) -> Dict[str, Any]:
@@ -26,9 +27,43 @@ def search_students(
     search_by: str,
     page: int,
     page_size: int,
+    gender: Optional[str] = None,
+    year_level: Optional[str] = None,
+    program_code: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """Search students with improved error handling."""
+    """Search students with improved error handling and filtering."""
     try:
+        # Parse filter parameters
+        filters = {}
+        
+        # Parse gender filter (can be comma-separated list)
+        if gender:
+            if ',' in gender:
+                filters["gender"] = [g.strip() for g in gender.split(',') if g.strip()]
+            else:
+                filters["gender"] = gender
+        
+        # Parse year level filter (can be comma-separated list)
+        if year_level:
+            try:
+                if ',' in year_level:
+                    filters["year_level"] = [int(yl.strip()) for yl in year_level.split(',') if yl.strip()]
+                else:
+                    filters["year_level"] = int(year_level)
+            except ValueError:
+                return {
+                    "success": False,
+                    "message": "Invalid year level filter format",
+                    "error_code": "INVALID_FILTER_FORMAT"
+                }
+        
+        # Parse program code filter (can be comma-separated list)
+        if program_code:
+            if ',' in program_code:
+                filters["program_code"] = [pc.strip() for pc in program_code.split(',') if pc.strip()]
+            else:
+                filters["program_code"] = program_code
+
         students, total_count = Student.search(
             search_by=search_by,
             search_term=search_term,
@@ -36,6 +71,7 @@ def search_students(
             sort_order=sort_order,
             page=page,
             page_size=page_size,
+            filters=filters,
         )
 
         return _ok(f"Found {len(students)} students", data=[s.to_dict() for s in students], total_count=total_count, page=page, page_size=page_size)
