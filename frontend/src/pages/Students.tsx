@@ -45,7 +45,25 @@ type ApiError = {
     }
 }
 
-function validateStudentDraft(draft: Partial<Student>): string[] {
+// Add avatar file validation function
+function validateAvatarFile(file: File): string | null {
+    // File size validation (5MB = 5 * 1024 * 1024 bytes)
+    const maxSize = 5 * 1024 * 1024; // 5MB in bytes
+    if (file.size > maxSize) {
+        return 'File size exceeds 5MB limit. Please select a smaller image.';
+    }
+    
+    // File type validation - allow common image types only
+    const allowedTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp', 'image/svg+xml'];
+    if (!allowedTypes.includes(file.type)) {
+        return 'Only image files (JPEG, PNG, GIF, WebP, SVG) are allowed. PDF and other document formats are not supported.';
+    }
+    
+    return null;
+}
+
+// Update the form validation to include photo requirement
+function validateStudentDraft(draft: Partial<Student>, isCreation: boolean = false, selectedFile: File | null = null): string[] {
     const errors: string[] = []
     if (!draft.id || !ID_REGEX.test(draft.id)) errors.push('ID must be in YYYY-NNNN format (e.g., 2025-0001).')
     if (!draft.firstName || !NAME_REGEX.test(draft.firstName)) errors.push('First Name must contain letters only.')
@@ -54,6 +72,26 @@ function validateStudentDraft(draft: Partial<Student>): string[] {
     if (!draft.gender) errors.push('Gender is required.')
     if (!draft.college) errors.push('College is required.')
     if (!draft.program) errors.push('Program is required.')
+    
+    // Only require photo for creation, not for updates
+    if (isCreation) {
+        if (!selectedFile) {
+            errors.push('A photo is required to create a student.')
+        } else {
+            // Validate the photo file
+            const photoValidationError = validateAvatarFile(selectedFile)
+            if (photoValidationError) {
+                errors.push(`Photo: ${photoValidationError}`)
+            }
+        }
+    } else if (selectedFile) {
+        // For updates, validate photo if selected (optional)
+        const photoValidationError = validateAvatarFile(selectedFile)
+        if (photoValidationError) {
+            errors.push(`Photo: ${photoValidationError}`)
+        }
+    }
+    
     return errors
 }
 
@@ -69,7 +107,7 @@ export function buildPhotoUrl(
     }
     
     try {
-        const supabaseUrl = "https://oqqrwmdagqrtkqbfxnlt.supabase.co";
+        const supabaseUrl = "https://iwmcuzrymhjltvrgddpe.supabase.co";
         
         const cleanPath = photoPath.startsWith('/') ? photoPath.slice(1) : photoPath;
 
@@ -122,8 +160,6 @@ export default function Students() {
 
     const [searchField, setSearchField] = useState<SortKey>('id')
     const [searchQuery, setSearchQuery] = useState('')
-    const [filterCollege, setFilterCollege] = useState('')
-    const [filterProgram, setFilterProgram] = useState('')
 
     const [sortKey, setSortKey] = useState<SortKey>('id')
     const [sortDir, setSortDir] = useState<SortDirection>('asc')
@@ -203,26 +239,6 @@ export default function Students() {
         return options
     }, [programs, draft.college])
 
-    // For filter dropdowns
-    const filterCollegeOptions = useMemo(() => 
-        [{ code: '', name: 'All' }, ...collegeOptions], 
-        [collegeOptions]
-    )
-    
-    const filterProgramOptions = useMemo(() => {
-        if (!filterCollege) return [{ code: '', name: 'All' }]
-        
-        const options = programs
-            .filter(p => p.collegeCode === filterCollege)
-            .map(p => ({
-                code: p.programCode,
-                name: p.programName
-            }))
-            .sort((a, b) => a.name.localeCompare(b.name))
-        
-        return [{ code: '', name: 'All' }, ...options]
-    }, [programs, filterCollege])
-
     // Server-driven listing
     const totalPages = Math.max(1, Math.ceil((meta?.total || 0) / PAGE_SIZE))
     const pageClamped = Math.min(Math.max(1, page), totalPages)
@@ -250,12 +266,6 @@ export default function Students() {
             if (searchQuery) {
                 params.q = searchQuery
                 params.search_by = fieldToServer[searchField]
-            }
-            if (filterCollege) {
-                params.college_code = filterCollege;
-            }
-            if (filterProgram) {
-                params.program_code = filterProgram;
             }
             
             const res = await listStudents(params)
@@ -304,7 +314,7 @@ export default function Students() {
     // Fetch list from server whenever relevant params change
     useEffect(() => {
         refreshStudentList()
-    }, [page, sortKey, sortDir, searchField, searchQuery, filterCollege, filterProgram])
+    }, [page, sortKey, sortDir, searchField, searchQuery])
 
     function handleSelectRow(indexOnPage: number) {
         const s = students[indexOnPage]
@@ -349,24 +359,12 @@ export default function Students() {
 
     // Update the handleAvatarUpload function to work with your Vue approach
     async function handleAvatarUpload(studentId: string): Promise<boolean> {
-        if (!selectedFile) return true // No file to upload is fine
+        if (!selectedFile) return false // Photo is required for creation
         
         try {
             setIsUploading(true)
             
-            // File size validation (5MB = 5 * 1024 * 1024 bytes)
-            const maxSize = 5 * 1024 * 1024; // 5MB in bytes
-            if (selectedFile.size > maxSize) {
-                alert('File size exceeds 5MB limit. Please select a smaller image.');
-                return false;
-            }
-            
-            // File type validation - allow common image types only
-            const allowedTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp', 'image/svg+xml'];
-            if (!allowedTypes.includes(selectedFile.type)) {
-                alert('Only image files (JPEG, PNG, GIF, WebP, SVG) are allowed. PDF and other document formats are not supported.');
-                return false;
-            }
+            // Note: Validation is already done before calling this function
             
             await uploadAvatarFile(studentId, selectedFile)
             
@@ -385,7 +383,7 @@ export default function Students() {
     }
 
     async function onAdd() {
-        const errors = validateStudentDraft(draft)
+        const errors = validateStudentDraft(draft, true, selectedFile) // Pass true for creation AND selectedFile
         if (errors.length) {
             alert(errors.join('\n'))
             return
@@ -406,13 +404,17 @@ export default function Students() {
             // First create the student
             await createStudent(studentToCreate)
             
-            // Then upload avatar if a file was selected
-            if (selectedFile) {
-                const uploadSuccess = await handleAvatarUpload(draft.id!)
-                if (!uploadSuccess) {
-                    // If avatar upload fails, we still created the student
-                    alert('Student created but avatar upload failed')
+            // Upload avatar (required for creation)
+            const uploadSuccess = await handleAvatarUpload(draft.id!)
+            if (!uploadSuccess) {
+                // If avatar upload fails, delete the student that was created
+                try {
+                    await deleteStudent(draft.id!)
+                    alert('Student creation failed: Avatar upload failed. Student record deleted.')
+                } catch (deleteErr) {
+                    alert('Student creation failed: Avatar upload failed. Student record was created but avatar upload failed.')
                 }
+                return
             }
             
             alert('Student created successfully!')
@@ -435,7 +437,9 @@ export default function Students() {
             alert('Select a student row to update.')
             return
         }
-        const errors = validateStudentDraft(draft)
+        
+        // For updates, pass false for isCreation AND selectedFile
+        const errors = validateStudentDraft(draft, false, selectedFile)
         if (errors.length) {
             alert(errors.join('\n'))
             return
@@ -477,9 +481,16 @@ export default function Students() {
             // Upload avatar if a new file was selected
             if (selectedFile) {
                 const uploadSuccess = await handleAvatarUpload(orig.id)
-                if (!uploadSuccess && Object.keys(updates).length === 0) {
-                    // If only avatar upload was attempted and it failed
-                    alert('Avatar upload failed')
+                if (!uploadSuccess) {
+                    // If avatar upload fails and we updated the student data,
+                    // we should notify the user that data was updated but avatar failed
+                    if (Object.keys(updates).length > 0) {
+                        alert('Student data updated but avatar upload failed')
+                    } else {
+                        alert('Avatar upload failed')
+                    }
+                    // Still refresh to show any successful updates
+                    await refreshStudentList()
                     return
                 }
             }
@@ -565,7 +576,11 @@ export default function Students() {
         }
     }
 
-    const canSubmit = validateStudentDraft(draft).length === 0
+    // Update the canSubmit calculation to include the photo validation
+    const canSubmit = validateStudentDraft(draft, selectedRowIndex === null, selectedFile).length === 0
+    // If selectedRowIndex is null (creating new student), isCreation = true
+    // If selectedRowIndex is not null (updating), isCreation = false
+
     const hasSelectedStudent = selectedRowIndex !== null
     const selectedStudent = hasSelectedStudent ? students[selectedRowIndex] : null
     const hasAvatar = selectedStudent && selectedStudent.photoPath
@@ -590,16 +605,7 @@ export default function Students() {
         syncHeights()
         window.addEventListener('resize', syncHeights)
         return () => window.removeEventListener('resize', syncHeights)
-    }, [draft, searchField, searchQuery, filterCollege, filterProgram, students.length])
-
-    // Filter students based on college and program filters
-    const filteredStudents = useMemo(() => {
-        return students.filter(s => {
-            if (filterCollege && s.college !== filterCollege) return false;
-            if (filterProgram && s.program !== filterProgram) return false;
-            return true;
-        });
-    }, [students, filterCollege, filterProgram]);
+    }, [draft, searchField, searchQuery, students.length])
 
     return (
         <div>
@@ -633,22 +639,6 @@ export default function Students() {
                                             Search by program code (e.g., BSCS, BSIT)
                                         </div>
                                     )}
-                                </div>
-                                <div className="col-6">
-                                    <label className="form-label">Filter College</label>
-                                    <select className="form-select" value={filterCollege} onChange={e => { setFilterCollege(e.target.value); setFilterProgram('') }}>
-                                        {filterCollegeOptions.map(option => 
-                                            <option key={option.code} value={option.code}>{option.name}</option>
-                                        )}
-                                    </select>
-                                </div>
-                                <div className="col-6">
-                                    <label className="form-label">Filter Program</label>
-                                    <select className="form-select" value={filterProgram} onChange={e => setFilterProgram(e.target.value)} disabled={!filterCollege}>
-                                        {filterProgramOptions.map(option => 
-                                            <option key={option.code} value={option.code}>{option.name}</option>
-                                        )}
-                                    </select>
                                 </div>
                             </div>
                         </div>
@@ -756,6 +746,19 @@ export default function Students() {
                                             className="form-control" 
                                             onChange={(e) => {
                                                 const file = e.target.files?.[0] || null
+                                                if (file) {
+                                                    // Validate file before setting it
+                                                    const validationError = validateAvatarFile(file)
+                                                    if (validationError) {
+                                                        alert(validationError)
+                                                        // Clear the file input
+                                                        if (fileInputRef.current) {
+                                                            fileInputRef.current.value = ''
+                                                        }
+                                                        setSelectedFile(null)
+                                                        return
+                                                    }
+                                                }
                                                 setSelectedFile(file)
                                             }}
                                             disabled={isUploading}
@@ -763,7 +766,7 @@ export default function Students() {
                                         <div className="form-text">
                                             {hasSelectedStudent 
                                                 ? 'Select a new image to replace current avatar' 
-                                                : 'Select an image to add as avatar (optional)'}
+                                                : 'Select an image to add as avatar (required for new students)'}
                                         </div>
                                         
                                         {selectedFile && (
@@ -786,7 +789,7 @@ export default function Students() {
                                         {!hasSelectedStudent && !selectedFile && (
                                             <div className="mt-2 p-2 bg-light rounded text-muted small">
                                                 <i className="bi bi-info-circle me-1"></i>
-                                                Avatar is optional. You can add one now or later.
+                                                Avatar is <strong>required</strong> for new students. Please select an image.
                                             </div>
                                         )}
                                     </div>
@@ -897,7 +900,7 @@ export default function Students() {
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    {filteredStudents.map((s, idx) => {
+                                    {students.map((s, idx) => {
                                         return (
                                             <tr key={s.id} className={selectedRowIndex === idx ? 'table-primary' : ''} onClick={() => handleSelectRow(idx)} style={{ cursor: 'pointer' }}>
                                                 <td style={{ width: 64 }}>
@@ -952,7 +955,7 @@ export default function Students() {
                                             </tr>
                                         );
                                     })}
-                                    {filteredStudents.length === 0 && (
+                                    {students.length === 0 && (
                                         <tr>
                                             <td colSpan={8} className="text-center text-muted py-4">
                                                 <i className="bi bi-people display-6 d-block mb-2"></i>
@@ -966,7 +969,7 @@ export default function Students() {
 
                         
                         <div className="d-flex align-items-center justify-content-between p-3 border-top">
-                            <div>Showing {filteredStudents.length} of {meta?.total || 0} students</div>
+                            <div>Showing {students.length} of {meta?.total || 0} students</div>
                             <div className="d-flex align-items-center gap-2">
                                 <button 
                                     className="btn btn-outline-secondary" 

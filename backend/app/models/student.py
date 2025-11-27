@@ -13,6 +13,7 @@ class Student(BaseModel):
     
     ALLOWED_GENDERS = {"MALE", "FEMALE", "OTHER"}
     BUCKET_NAME = os.environ.get("SUPABASE_BUCKET_NAME", "ssis_web_bucket")  # Add bucket name
+    
     def __init__(self, id_number: str = "", first_name: str = "", last_name: str = "", 
                  year_level: Optional[int] = None, gender: str = "", program_code: str = "",
                  photo_path: str = ""):
@@ -300,6 +301,64 @@ class Student(BaseModel):
             logger.warning(f"Error deleting photo from storage: {str(e)}")
             return False
     
+    def _build_filter_clause(self, filters: Dict[str, Any], params: Dict[str, Any]) -> str:
+        """Build WHERE clause for multiple filters."""
+        conditions = []
+        
+        if filters.get("gender"):
+            genders = filters["gender"]
+            if isinstance(genders, list) and len(genders) > 0:
+                gender_placeholders = []
+                for i, gender in enumerate(genders):
+                    param_name = f"gender_{i}"
+                    gender_placeholders.append(f":{param_name}")
+                    params[param_name] = gender
+                conditions.append(f"gender IN ({', '.join(gender_placeholders)})")
+            elif isinstance(genders, str):
+                params["gender_filter"] = genders
+                conditions.append("gender = :gender_filter")
+        
+        if filters.get("year_level"):
+            year_levels = filters["year_level"]
+            if isinstance(year_levels, list) and len(year_levels) > 0:
+                year_placeholders = []
+                for i, year_level in enumerate(year_levels):
+                    param_name = f"year_level_{i}"
+                    year_placeholders.append(f":{param_name}")
+                    params[param_name] = int(year_level)
+                conditions.append(f"year_level IN ({', '.join(year_placeholders)})")
+            elif isinstance(year_levels, (int, str)):
+                params["year_level_filter"] = int(year_levels)
+                conditions.append("year_level = :year_level_filter")
+        
+        if filters.get("program_code"):
+            programs = filters["program_code"]
+            if isinstance(programs, list) and len(programs) > 0:
+                program_placeholders = []
+                for i, program in enumerate(programs):
+                    param_name = f"program_{i}"
+                    program_placeholders.append(f":{param_name}")
+                    params[param_name] = program.upper()
+                conditions.append(f"UPPER(program_code) IN ({', '.join(program_placeholders)})")
+            elif isinstance(programs, str):
+                params["program_filter"] = programs.upper()
+                conditions.append("UPPER(program_code) = :program_filter")
+        
+        if filters.get("college_code"):
+            college_codes = filters["college_code"]
+            if isinstance(college_codes, list) and len(college_codes) > 0:
+                college_placeholders = []
+                for i, college_code in enumerate(college_codes):
+                    param_name = f"college_code_{i}"
+                    college_placeholders.append(f":{param_name}")
+                    params[param_name] = college_code.upper()
+                conditions.append(f"UPPER(college_code) IN ({', '.join(college_placeholders)})")
+            elif isinstance(college_codes, str):
+                params["college_code_filter"] = college_codes.upper()
+                conditions.append("UPPER(college_code) = :college_code_filter")
+        
+        return " AND ".join(conditions) if conditions else ""
+    
     @classmethod
     def find_by_id(cls, id_number: str) -> Optional['Student']:
         """Find student by ID number."""
@@ -334,8 +393,9 @@ class Student(BaseModel):
     
     @classmethod
     def search(cls, search_by: str = "", search_term: str = "", sort_by: str = "id_number", 
-               sort_order: str = "ASC", page: int = 1, page_size: int = 10) -> Tuple[List['Student'], int]:
-        """Search students with pagination."""
+            sort_order: str = "ASC", page: int = 1, page_size: int = 10,
+            filters: Optional[Dict[str, Any]] = None) -> Tuple[List['Student'], int]:
+        """Search students with pagination and filtering."""
         # Validate sort field
         allowed_sort_fields = ["id_number", "first_name", "last_name", "year_level", "gender", "program_code"]
         if sort_by not in allowed_sort_fields:
@@ -346,9 +406,42 @@ class Student(BaseModel):
         if search_by and search_by not in allowed_search_fields:
             search_by = ""
         
-        # Build search filter
+        # Initialize filters if not provided
+        if filters is None:
+            filters = {}
+        
+        # Initialize instance and parameters
         instance = cls()
-        filters, params = instance._build_search_filter(search_by, search_term, allowed_search_fields)
+        params = {}
+        
+        # Build search filter - FIXED: capture both where_clause AND params
+        search_where_clause, search_params = instance._build_search_filter(search_by, search_term, allowed_search_fields)
+        
+        # Merge search parameters into main params dictionary
+        params.update(search_params)
+        
+        # Build additional filters (gender, year_level, program_code, college_code)
+        filter_clause = instance._build_filter_clause(filters, params)
+        
+        # Combine search and filter conditions
+        where_parts = []
+        
+        # Add search filter if present - FIXED: use the where_clause without "WHERE " prefix
+        if search_where_clause:
+            # search_where_clause already includes "WHERE " if it has content
+            # Extract just the condition part
+            if search_where_clause.startswith("WHERE "):
+                search_condition = search_where_clause[6:]  # Remove "WHERE "
+                where_parts.append(search_condition)
+        
+        # Add additional filters
+        if filter_clause:
+            where_parts.append(filter_clause)
+        
+        # Build final WHERE clause
+        where_clause = ""
+        if where_parts:
+            where_clause = "WHERE " + " AND ".join(where_parts)
         
         # Build sort clause
         sort_clause = instance._build_sort_clause(sort_by, sort_order, allowed_sort_fields)
@@ -361,7 +454,7 @@ class Student(BaseModel):
         query = f"""
             SELECT id_number, first_name, last_name, year_level, gender, program_code, photo_path
             FROM students
-            {filters}
+            {where_clause}
             {sort_clause}
             {pagination_clause}
         """
@@ -370,12 +463,12 @@ class Student(BaseModel):
         students = [cls.from_dict(dict(row)) for row in result.mappings().all()] if result else []
         
         # Get total count
-        count_query = f"SELECT COUNT(*) FROM students {filters}"
+        count_query = f"SELECT COUNT(*) FROM students {where_clause}"
         count_result = instance._execute_query(count_query, params)
         total_count = count_result.scalar() or 0
         
         return students, total_count
-    
+
     @classmethod
     def get_all(cls) -> List['Student']:
         """Get all students."""

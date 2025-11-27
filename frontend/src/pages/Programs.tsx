@@ -323,14 +323,6 @@ export default function ProgramManager() {
                     <input className="form-control" value={searchQuery} onChange={e => setSearchQuery(e.target.value)} />
                   </div>
                 </div>
-                <div className="col-12">
-                  <label className="form-label">Filter College</label>
-                  <select className="form-select" value={filterCollege} onChange={e => setFilterCollege(e.target.value)}>
-                    {filterCollegeOptions.map(option => 
-                      <option key={option.code} value={option.code}>{option.name}</option>
-                    )}
-                  </select>
-                </div>
               </div>
             </div>
           </div>
