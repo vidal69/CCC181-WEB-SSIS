@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.Python
+Pipfile.lock
+.env
+.flaskenv
+
+# Node
+node_modules/
+dist/
+frontend/node_modules/
+frontend/dist/
+
+# Editor
+.vscode/
+*.swp
+.DS_Store
+
+# Env
+.env.local

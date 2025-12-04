@@ -4,10 +4,19 @@ verify_ssl = true
 name = "pypi"
 
 [packages]
-flask = "*"
 flask-cors = "*"
+gunicorn = "*"
+alembic = "*"
+flask = "*"
+flask-bcrypt = "*"
+python-dotenv = "*"
+sqlalchemy = "*"
+psycopg2-binary = "*"
+flask-jwt-extended = "*"
+supabase = "*"
 
 [dev-packages]
+flask-cors = "*"
 
 [requires]
 python_version = "3.13"
