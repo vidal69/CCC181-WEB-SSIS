@@ -107,7 +107,7 @@ export function buildPhotoUrl(
     }
     
     try {
-        const supabaseUrl = "https://iwmcuzrymhjltvrgddpe.supabase.co";
+        const supabaseUrl = "https://oqqrwmdagqrtkqbfxnlt.supabase.co";
         
         const cleanPath = photoPath.startsWith('/') ? photoPath.slice(1) : photoPath;
 
@@ -154,19 +154,34 @@ export default function Students() {
         college: '',
         program: '',
     })
-    const [selectedRowIndex, setSelectedRowIndex] = useState<number | null>(null)
     const [selectedFile, setSelectedFile] = useState<File | null>(null)
     const [isUploading, setIsUploading] = useState(false)
 
     const [searchField, setSearchField] = useState<SortKey>('id')
     const [searchQuery, setSearchQuery] = useState('')
+    const [filterCollege, setFilterCollege] = useState('')
+    const [filterProgram, setFilterProgram] = useState('')
+    // New filter states
+    const [filterGender, setFilterGender] = useState<string>('')
+    const [filterYearLevel, setFilterYearLevel] = useState<string>('')
 
     const [sortKey, setSortKey] = useState<SortKey>('id')
     const [sortDir, setSortDir] = useState<SortDirection>('asc')
     const [page, setPage] = useState(1)
 
+    // Modal states
+    const [showEditModal, setShowEditModal] = useState(false)
+    const [showDeleteModal, setShowDeleteModal] = useState(false)
+    const [studentToEdit, setStudentToEdit] = useState<Student | null>(null)
+    const [studentToDelete, setStudentToDelete] = useState<Student | null>(null)
+    
+    // Edit form state
+    const [editDraft, setEditDraft] = useState<Partial<Student>>({})
+    const [editSelectedFile, setEditSelectedFile] = useState<File | null>(null)
+
     // File input ref to clear it
     const fileInputRef = useRef<HTMLInputElement>(null)
+    const editFileInputRef = useRef<HTMLInputElement>(null)
 
     // Load colleges and programs from API
     useEffect(() => {
@@ -239,6 +254,59 @@ export default function Students() {
         return options
     }, [programs, draft.college])
 
+    // Program options for edit modal based on selected college
+    const editProgramOptions = useMemo(() => {
+        if (!editDraft.college) return []
+        
+        const options = programs
+            .filter(p => p.collegeCode === editDraft.college)
+            .map(p => ({
+                code: p.programCode,
+                name: p.programName
+            }))
+            .sort((a, b) => a.name.localeCompare(b.name))
+        
+        return options
+    }, [programs, editDraft.college])
+
+    // For filter dropdowns
+    const filterCollegeOptions = useMemo(() => 
+        [{ code: '', name: 'All' }, ...collegeOptions], 
+        [collegeOptions]
+    )
+    
+    const filterProgramOptions = useMemo(() => {
+        if (!filterCollege) return [{ code: '', name: 'All' }]
+        
+        const options = programs
+            .filter(p => p.collegeCode === filterCollege)
+            .map(p => ({
+                code: p.programCode,
+                name: p.programName
+            }))
+            .sort((a, b) => a.name.localeCompare(b.name))
+        
+        return [{ code: '', name: 'All' }, ...options]
+    }, [programs, filterCollege])
+
+    // Gender filter options
+    const genderOptions = useMemo(() => [
+        { value: '', label: 'All Gender' },
+        { value: 'Male', label: 'Male' },
+        { value: 'Female', label: 'Female' },
+        { value: 'Other', label: 'Other' }
+    ], [])
+
+    // Year level filter options
+    const yearLevelOptions = useMemo(() => [
+        { value: '', label: 'All Year Levels' },
+        { value: '1', label: '1st Years' },
+        { value: '2', label: '2nd Years' },
+        { value: '3', label: '3rd Years' },
+        { value: '4', label: '4th Years' },
+        { value: '5', label: '5th Years' }
+    ], [])
+
     // Server-driven listing
     const totalPages = Math.max(1, Math.ceil((meta?.total || 0) / PAGE_SIZE))
     const pageClamped = Math.min(Math.max(1, page), totalPages)
@@ -255,7 +323,7 @@ export default function Students() {
     }
 
     // Function to refresh student list
-    const refreshStudentList = async () => {
+    const refreshStudentList = useCallback(async () => {
         try {
             const params: Record<string, any> = {
                 page: pageClamped,
@@ -266,6 +334,19 @@ export default function Students() {
             if (searchQuery) {
                 params.q = searchQuery
                 params.search_by = fieldToServer[searchField]
+            }
+            if (filterCollege) {
+                params.college_code = filterCollege;
+            }
+            if (filterProgram) {
+                params.program_code = filterProgram;
+            }
+            // Add new filter parameters
+            if (filterGender) {
+                params.gender = filterGender.toUpperCase();
+            }
+            if (filterYearLevel) {
+                params.year_level = filterYearLevel;
             }
             
             const res = await listStudents(params)
@@ -304,7 +385,7 @@ export default function Students() {
             const error = err as ApiError
             alert(error?.message || 'Failed to load students')
         }
-    }
+    }, [pageClamped, sortKey, sortDir, searchField, searchQuery, filterCollege, filterProgram, filterGender, filterYearLevel, programToCollegeMap])
 
     const getAvatarUrlDirect = useCallback((student: Student) => {
         if (!student.photoPath) return null;
@@ -313,41 +394,11 @@ export default function Students() {
 
     // Fetch list from server whenever relevant params change
     useEffect(() => {
-        refreshStudentList()
-    }, [page, sortKey, sortDir, searchField, searchQuery])
-
-    function handleSelectRow(indexOnPage: number) {
-        const s = students[indexOnPage]
-        if (!s) return
-        console.log('Selected student:', s)
-        
-        // Determine the college based on the program code
-        const collegeCode = programToCollegeMap[s.program] || s.college
-        
-        console.log('College determined from program:', collegeCode)
-        console.log('Program value:', s.program)
-        
-        setSelectedRowIndex(indexOnPage)
-        setDraft({ 
-            ...s,
-            college: collegeCode  // Use the college from the program mapping
-        })
-        setSelectedFile(null) // Clear selected file when selecting a different student
-        // Clear the file input
-        if (fileInputRef.current) {
-            fileInputRef.current.value = ''
+        // Only fetch students if colleges and programs are loaded
+        if (colleges.length > 0 && programs.length > 0) {
+            refreshStudentList()
         }
-    }
-
-    function clearForm() {
-        setSelectedRowIndex(null)
-        setDraft({ id: '', firstName: '', lastName: '', yearLevel: undefined, gender: undefined, college: '', program: '' })
-        setSelectedFile(null)
-        // Clear the file input
-        if (fileInputRef.current) {
-            fileInputRef.current.value = ''
-        }
-    }
+    }, [page, sortKey, sortDir, searchField, searchQuery, filterCollege, filterProgram, filterGender, filterYearLevel, colleges.length, programs.length, refreshStudentList])
 
     // Helper function to clear file input
     const clearFileInput = () => {
@@ -357,16 +408,24 @@ export default function Students() {
         }
     }
 
+    // Helper function to clear edit file input
+    const clearEditFileInput = () => {
+        setEditSelectedFile(null)
+        if (editFileInputRef.current) {
+            editFileInputRef.current.value = ''
+        }
+    }
+
     // Update the handleAvatarUpload function to work with your Vue approach
-    async function handleAvatarUpload(studentId: string): Promise<boolean> {
-        if (!selectedFile) return false // Photo is required for creation
+    async function handleAvatarUpload(studentId: string, file: File): Promise<boolean> {
+        if (!file) return false
         
         try {
             setIsUploading(true)
             
             // Note: Validation is already done before calling this function
             
-            await uploadAvatarFile(studentId, selectedFile)
+            await uploadAvatarFile(studentId, file)
             
             // After upload, refresh to get the new photoPath
             await refreshStudentList()
@@ -380,6 +439,35 @@ export default function Students() {
         } finally {
             setIsUploading(false)
         }
+    }
+
+    // Function to open edit modal
+    const handleEditClick = (student: Student) => {
+        setStudentToEdit(student)
+        setEditDraft({ ...student })
+        setEditSelectedFile(null)
+        setShowEditModal(true)
+    }
+
+    // Function to open delete modal
+    const handleDeleteClick = (student: Student) => {
+        setStudentToDelete(student)
+        setShowDeleteModal(true)
+    }
+
+    // Function to close edit modal
+    const closeEditModal = () => {
+        setShowEditModal(false)
+        setStudentToEdit(null)
+        setEditDraft({})
+        setEditSelectedFile(null)
+        clearEditFileInput()
+    }
+
+    // Function to close delete modal
+    const closeDeleteModal = () => {
+        setShowDeleteModal(false)
+        setStudentToDelete(null)
     }
 
     async function onAdd() {
@@ -405,7 +493,7 @@ export default function Students() {
             await createStudent(studentToCreate)
             
             // Upload avatar (required for creation)
-            const uploadSuccess = await handleAvatarUpload(draft.id!)
+            const uploadSuccess = await handleAvatarUpload(draft.id!, selectedFile!)
             if (!uploadSuccess) {
                 // If avatar upload fails, delete the student that was created
                 try {
@@ -432,55 +520,51 @@ export default function Students() {
         }
     }
 
-    async function onUpdate() {
-        if (selectedRowIndex === null) {
-            alert('Select a student row to update.')
-            return
-        }
+    async function onEdit() {
+        if (!studentToEdit) return;
         
         // For updates, pass false for isCreation AND selectedFile
-        const errors = validateStudentDraft(draft, false, selectedFile)
+        const errors = validateStudentDraft(editDraft, false, editSelectedFile)
         if (errors.length) {
             alert(errors.join('\n'))
             return
         }
         
         try {
-            const orig = students[selectedRowIndex]
-            console.log('Original student:', orig)
-            console.log('Draft updates:', draft)
+            console.log('Original student:', studentToEdit)
+            console.log('Draft updates:', editDraft)
             
             // Prepare update payload - only include changed fields
             const updates: Partial<Student> = {}
-            if (draft.id && draft.id !== orig.id) updates.id = draft.id
-            if (draft.firstName && draft.firstName !== orig.firstName) updates.firstName = draft.firstName
-            if (draft.lastName && draft.lastName !== orig.lastName) updates.lastName = draft.lastName
-            if (draft.yearLevel !== undefined && draft.yearLevel !== orig.yearLevel) updates.yearLevel = Number(draft.yearLevel)
-            if (draft.gender && draft.gender !== orig.gender) updates.gender = draft.gender
-            if (draft.college && draft.college !== orig.college) {
-                console.log('College changed from', orig.college, 'to', draft.college)
-                updates.college = draft.college
+            if (editDraft.id && editDraft.id !== studentToEdit.id) updates.id = editDraft.id
+            if (editDraft.firstName && editDraft.firstName !== studentToEdit.firstName) updates.firstName = editDraft.firstName
+            if (editDraft.lastName && editDraft.lastName !== studentToEdit.lastName) updates.lastName = editDraft.lastName
+            if (editDraft.yearLevel !== undefined && editDraft.yearLevel !== studentToEdit.yearLevel) updates.yearLevel = Number(editDraft.yearLevel)
+            if (editDraft.gender && editDraft.gender !== studentToEdit.gender) updates.gender = editDraft.gender
+            if (editDraft.college && editDraft.college !== studentToEdit.college) {
+                console.log('College changed from', studentToEdit.college, 'to', editDraft.college)
+                updates.college = editDraft.college
             }
-            if (draft.program && draft.program !== orig.program) {
-                console.log('Program changed from', orig.program, 'to', draft.program)
-                updates.program = draft.program
+            if (editDraft.program && editDraft.program !== studentToEdit.program) {
+                console.log('Program changed from', studentToEdit.program, 'to', editDraft.program)
+                updates.program = editDraft.program
             }
             
             console.log('Updates to send:', updates)
             
-            if (Object.keys(updates).length === 0 && !selectedFile) {
+            if (Object.keys(updates).length === 0 && !editSelectedFile) {
                 alert('No changes to update')
                 return
             }
             
             // Update student data if there are changes
             if (Object.keys(updates).length > 0) {
-                await updateStudent(orig.id, updates)
+                await updateStudent(studentToEdit.id, updates)
             }
             
             // Upload avatar if a new file was selected
-            if (selectedFile) {
-                const uploadSuccess = await handleAvatarUpload(orig.id)
+            if (editSelectedFile) {
+                const uploadSuccess = await handleAvatarUpload(studentToEdit.id, editSelectedFile)
                 if (!uploadSuccess) {
                     // If avatar upload fails and we updated the student data,
                     // we should notify the user that data was updated but avatar failed
@@ -499,8 +583,7 @@ export default function Students() {
             
             // Refresh the list
             await refreshStudentList()
-            clearForm()
-            clearFileInput() // Clear the file input after updating
+            closeEditModal()
             
         } catch (err: unknown) {
             const error = err as ApiError
@@ -511,21 +594,15 @@ export default function Students() {
     }
 
     async function onDelete() {
-        if (selectedRowIndex === null) {
-            alert('Select a student row to delete.')
-            return
-        }
-        if (!confirm('Are you sure you want to delete this student? This will also delete their avatar if it exists.')) return
+        if (!studentToDelete) return;
         
         try {
-            const orig = students[selectedRowIndex]
-            await deleteStudent(orig.id)
+            await deleteStudent(studentToDelete.id)
             alert('Student deleted successfully!')
             
             // Refresh the list
             await refreshStudentList()
-            clearForm()
-            clearFileInput() // Clear the file input after deleting
+            closeDeleteModal()
             
         } catch (err: unknown) {
             const error = err as ApiError
@@ -535,15 +612,11 @@ export default function Students() {
         }
     }
 
-    // Update the onRemoveAvatar function
+    // Update the onRemoveAvatar function for edit modal
     async function onRemoveAvatar() {
-        if (selectedRowIndex === null) {
-            alert('Select a student row to remove avatar.')
-            return
-        }
+        if (!studentToEdit) return;
         
-        const orig = students[selectedRowIndex]
-        if (!orig.photoPath) {
+        if (!studentToEdit.photoPath) {
             alert('This student does not have an avatar.')
             return
         }
@@ -551,7 +624,7 @@ export default function Students() {
         if (!confirm('Are you sure you want to remove this student\'s avatar?')) return
         
         try {
-            await deleteAvatar(orig.id)
+            await deleteAvatar(studentToEdit.id)
             alert('Avatar removed successfully!')
             
             // Refresh to update the photoPath
@@ -561,6 +634,15 @@ export default function Students() {
             const error = err as ApiError
             const errorMessage = error?.message || 'Failed to remove avatar'
             alert(`Failed to remove avatar: ${errorMessage}`)
+        }
+    }
+
+    function clearForm() {
+        setDraft({ id: '', firstName: '', lastName: '', yearLevel: undefined, gender: undefined, college: '', program: '' })
+        setSelectedFile(null)
+        // Clear the file input
+        if (fileInputRef.current) {
+            fileInputRef.current.value = ''
         }
     }
 
@@ -577,22 +659,10 @@ export default function Students() {
     }
 
     // Update the canSubmit calculation to include the photo validation
-    const canSubmit = validateStudentDraft(draft, selectedRowIndex === null, selectedFile).length === 0
-    // If selectedRowIndex is null (creating new student), isCreation = true
-    // If selectedRowIndex is not null (updating), isCreation = false
-
-    const hasSelectedStudent = selectedRowIndex !== null
-    const selectedStudent = hasSelectedStudent ? students[selectedRowIndex] : null
-    const hasAvatar = selectedStudent && selectedStudent.photoPath
-    const currentAvatarUrl = hasAvatar ? buildPhotoUrl(selectedStudent.photoPath) : null
-
-    // Debug: log the current draft values
-    useEffect(() => {
-        console.log('Current draft:', draft)
-        console.log('College options:', collegeOptions)
-        console.log('Program options:', programOptions)
-        console.log('Available programs for current college:', programs.filter(p => p.collegeCode === draft.college))
-    }, [draft, collegeOptions, programOptions, programs])
+    const canSubmit = validateStudentDraft(draft, true, selectedFile).length === 0
+    
+    // Can submit edit form
+    const canSubmitEdit = validateStudentDraft(editDraft, false, editSelectedFile).length === 0
 
     const leftColRef = useRef<HTMLDivElement | null>(null)
     const [tableMaxHeight, setTableMaxHeight] = useState<number | null>(null)
@@ -605,7 +675,19 @@ export default function Students() {
         syncHeights()
         window.addEventListener('resize', syncHeights)
         return () => window.removeEventListener('resize', syncHeights)
-    }, [draft, searchField, searchQuery, students.length])
+    }, [draft, searchField, searchQuery, filterCollege, filterProgram, students.length])
+
+    // Filter students based on college and program filters
+    const filteredStudents = useMemo(() => {
+        return students.filter(s => {
+            if (filterCollege && s.college !== filterCollege) return false;
+            if (filterProgram && s.program !== filterProgram) return false;
+            return true;
+        });
+    }, [students, filterCollege, filterProgram]);
+
+    // Get current avatar URL for edit modal
+    const editAvatarUrl = studentToEdit?.photoPath ? buildPhotoUrl(studentToEdit.photoPath) : null;
 
     return (
         <div>
@@ -640,6 +722,76 @@ export default function Students() {
                                         </div>
                                     )}
                                 </div>
+                                
+                                {/* New Filter Dropdowns */}
+                                <div className="col-12">
+                                    <div className="row g-2">
+                                        <div className="col-6">
+                                            <label className="form-label">Gender</label>
+                                            <select 
+                                                className="form-select" 
+                                                value={filterGender} 
+                                                onChange={e => setFilterGender(e.target.value)}
+                                            >
+                                                {genderOptions.map(option => (
+                                                    <option key={option.value} value={option.value}>
+                                                        {option.label}
+                                                    </option>
+                                                ))}
+                                            </select>
+                                        </div>
+                                        <div className="col-6">
+                                            <label className="form-label">Year Level</label>
+                                            <select 
+                                                className="form-select" 
+                                                value={filterYearLevel} 
+                                                onChange={e => setFilterYearLevel(e.target.value)}
+                                            >
+                                                {yearLevelOptions.map(option => (
+                                                    <option key={option.value} value={option.value}>
+                                                        {option.label}
+                                                    </option>
+                                                ))}
+                                            </select>
+                                        </div>
+                                    </div>
+                                </div>
+                                
+                                {/* Existing College/Program Filters */}
+                                <div className="col-6">
+                                    <label className="form-label">Filter College</label>
+                                    <select className="form-select" value={filterCollege} onChange={e => { setFilterCollege(e.target.value); setFilterProgram('') }}>
+                                        {filterCollegeOptions.map(option => 
+                                            <option key={option.code} value={option.code}>{option.name}</option>
+                                        )}
+                                    </select>
+                                </div>
+                                <div className="col-6">
+                                    <label className="form-label">Filter Program</label>
+                                    <select className="form-select" value={filterProgram} onChange={e => setFilterProgram(e.target.value)} disabled={!filterCollege}>
+                                        {filterProgramOptions.map(option => 
+                                            <option key={option.code} value={option.code}>{option.name}</option>
+                                        )}
+                                    </select>
+                                </div>
+                                
+                                {/* Clear Filters Button */}
+                                {(filterGender || filterYearLevel || filterCollege || filterProgram) && (
+                                    <div className="col-12">
+                                        <button 
+                                            className="btn btn-outline-secondary btn-sm w-100"
+                                            onClick={() => {
+                                                setFilterGender('')
+                                                setFilterYearLevel('')
+                                                setFilterCollege('')
+                                                setFilterProgram('')
+                                            }}
+                                        >
+                                            <i className="bi bi-x-circle me-1"></i>
+                                            Clear All Filters
+                                        </button>
+                                    </div>
+                                )}
                             </div>
                         </div>
                     </div>
@@ -647,6 +799,7 @@ export default function Students() {
                     
                     <div className="card frosted-glass mb-3">
                         <div className="card-body">
+                            <h5 className="card-title mb-3">Add New Student</h5>
                             <div className="row g-3">
                                 <div className="col-12">
                                     <label className="form-label">ID (YYYY-NNNN)</label>
@@ -703,41 +856,7 @@ export default function Students() {
                                 <div className="col-12">
                                     <label className="form-label">Avatar</label>
                                     
-                                    {/* Show current avatar if editing */}
-                                    {hasSelectedStudent && currentAvatarUrl && (
-                                        <div className="mb-3">
-                                            <div className="d-flex align-items-center gap-3">
-                                                <img 
-                                                    src={currentAvatarUrl} 
-                                                    alt="Current avatar" 
-                                                    style={{ 
-                                                        width: 60, 
-                                                        height: 60, 
-                                                        objectFit: 'cover', 
-                                                        borderRadius: 8,
-                                                        border: '2px solid #ddd'
-                                                    }} 
-                                                />
-                                                <div>
-                                                    <div className="text-success small mb-1">
-                                                        <i className="bi bi-check-circle-fill me-1"></i>
-                                                        Has avatar
-                                                    </div>
-                                                    <button 
-                                                        type="button" 
-                                                        className="btn btn-sm btn-outline-danger"
-                                                        onClick={onRemoveAvatar}
-                                                        disabled={isUploading}
-                                                    >
-                                                        <i className="bi bi-trash me-1"></i>
-                                                        Remove Avatar
-                                                    </button>
-                                                </div>
-                                            </div>
-                                        </div>
-                                    )}
-                                    
-                                    {/* Avatar upload for new student or to replace existing */}
+                                    {/* Avatar upload for new student */}
                                     <div className="mb-3">
                                         <input 
                                             ref={fileInputRef}
@@ -764,9 +883,7 @@ export default function Students() {
                                             disabled={isUploading}
                                         />
                                         <div className="form-text">
-                                            {hasSelectedStudent 
-                                                ? 'Select a new image to replace current avatar' 
-                                                : 'Select an image to add as avatar (required for new students)'}
+                                            Select an image to add as avatar (required for new students)
                                         </div>
                                         
                                         {selectedFile && (
@@ -786,7 +903,7 @@ export default function Students() {
                                             </div>
                                         )}
                                         
-                                        {!hasSelectedStudent && !selectedFile && (
+                                        {!selectedFile && (
                                             <div className="mt-2 p-2 bg-light rounded text-muted small">
                                                 <i className="bi bi-info-circle me-1"></i>
                                                 Avatar is <strong>required</strong> for new students. Please select an image.
@@ -810,25 +927,6 @@ export default function Students() {
                                         ) : 'Add'}
                                     </button>
                                     <button 
-                                        className="btn btn-warning" 
-                                        onClick={onUpdate} 
-                                        disabled={selectedRowIndex === null || !canSubmit || isUploading}
-                                    >
-                                        {isUploading ? (
-                                            <>
-                                                <span className="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>
-                                                Updating...
-                                            </>
-                                        ) : 'Update'}
-                                    </button>
-                                    <button 
-                                        className="btn btn-danger" 
-                                        onClick={onDelete} 
-                                        disabled={selectedRowIndex === null || isUploading}
-                                    >
-                                        Delete
-                                    </button>
-                                    <button 
                                         className="btn btn-outline-secondary" 
                                         onClick={clearForm}
                                         disabled={isUploading}
@@ -843,26 +941,6 @@ export default function Students() {
                                         <i className="bi bi-arrow-clockwise me-1"></i>
                                         Refresh
                                     </button>
-                                </div>
-                                
-                                {/* Status Messages */}
-                                <div className="col-12">
-                                    {hasSelectedStudent && (
-                                        <div className="alert alert-info py-2 mt-2 small">
-                                            <div className="d-flex align-items-center">
-                                                <i className="bi bi-person-circle me-2"></i>
-                                                <div>
-                                                    Editing: <strong>{draft.firstName} {draft.lastName}</strong>
-                                                    {hasAvatar && (
-                                                        <span className="ms-2 text-success">
-                                                            <i className="bi bi-check-circle me-1"></i>
-                                                            Has avatar
-                                                        </span>
-                                                    )}
-                                                </div>
-                                            </div>
-                                        </div>
-                                    )}
                                 </div>
                             </div>
                         </div>
@@ -897,12 +975,13 @@ export default function Students() {
                                                 </div>
                                             </th>
                                         ))}
+                                        <th>Actions</th>
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    {students.map((s, idx) => {
+                                    {filteredStudents.map((s, idx) => {
                                         return (
-                                            <tr key={s.id} className={selectedRowIndex === idx ? 'table-primary' : ''} onClick={() => handleSelectRow(idx)} style={{ cursor: 'pointer' }}>
+                                            <tr key={s.id} style={{ cursor: 'pointer' }}>
                                                 <td style={{ width: 64 }}>
                                                     <div className="position-relative">
                                                         {s.photoPath ? (
@@ -952,12 +1031,45 @@ export default function Students() {
                                                 {/* Show College Code and Program Code instead of names */}
                                                 <td>{s.college}</td>
                                                 <td>{s.program}</td>
+                                                <td>
+                                                    <div className="d-flex gap-1">
+                                                        <button 
+                                                            className="btn btn-sm btn-outline-warning"
+                                                            onClick={(e) => {
+                                                                e.stopPropagation();
+                                                                handleEditClick(s);
+                                                            }}
+                                                            title="Edit student"
+                                                        >
+                                                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                                                <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
+                                                                <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
+                                                            </svg>
+                                                        </button>
+                                                        <button 
+                                                            className="btn btn-sm btn-outline-danger"
+                                                            onClick={(e) => {
+                                                                e.stopPropagation();
+                                                                handleDeleteClick(s);
+                                                            }}
+                                                            title="Delete student"
+                                                        >
+                                                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                                                <path d="M3 6h18"></path>
+                                                                <path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"></path>
+                                                                <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"></path>
+                                                                <line x1="10" y1="11" x2="10" y2="17"></line>
+                                                                <line x1="14" y1="11" x2="14" y2="17"></line>
+                                                            </svg>
+                                                        </button>
+                                                    </div>
+                                                </td>
                                             </tr>
                                         );
                                     })}
-                                    {students.length === 0 && (
+                                    {filteredStudents.length === 0 && (
                                         <tr>
-                                            <td colSpan={8} className="text-center text-muted py-4">
+                                            <td colSpan={9} className="text-center text-muted py-4">
                                                 <i className="bi bi-people display-6 d-block mb-2"></i>
                                                 No students to display.
                                             </td>
@@ -969,7 +1081,7 @@ export default function Students() {
 
                         
                         <div className="d-flex align-items-center justify-content-between p-3 border-top">
-                            <div>Showing {students.length} of {meta?.total || 0} students</div>
+                            <div>Showing {filteredStudents.length} of {meta?.total || 0} students</div>
                             <div className="d-flex align-items-center gap-2">
                                 <button 
                                     className="btn btn-outline-secondary" 
@@ -1002,6 +1114,259 @@ export default function Students() {
                     </div>
                 </div>
             </div>
+
+            {/* Edit Student Modal */}
+            {showEditModal && studentToEdit && (
+                <div className="modal fade show" style={{ display: 'block', backgroundColor: 'rgba(0,0,0,0.5)' }}>
+                    <div className="modal-dialog modal-lg">
+                        <div className="modal-content">
+                            <div className="modal-header">
+                                <h5 className="modal-title">Edit Student: {studentToEdit.firstName} {studentToEdit.lastName}</h5>
+                                <button type="button" className="btn-close" onClick={closeEditModal}></button>
+                            </div>
+                            <div className="modal-body">
+                                <div className="row g-3">
+                                    <div className="col-12">
+                                        <label className="form-label">ID (YYYY-NNNN)</label>
+                                        <input 
+                                            className="form-control" 
+                                            value={editDraft.id || ''} 
+                                            onChange={e => setEditDraft(prev => ({ ...prev, id: e.target.value }))}
+                                        />
+                                    </div>
+                                    <div className="col-12">
+                                        <label className="form-label">First Name</label>
+                                        <input 
+                                            className="form-control" 
+                                            value={editDraft.firstName || ''} 
+                                            onChange={e => setEditDraft(prev => ({ ...prev, firstName: e.target.value }))} 
+                                        />
+                                    </div>
+                                    <div className="col-12">
+                                        <label className="form-label">Last Name</label>
+                                        <input 
+                                            className="form-control" 
+                                            value={editDraft.lastName || ''} 
+                                            onChange={e => setEditDraft(prev => ({ ...prev, lastName: e.target.value }))} 
+                                        />
+                                    </div>
+                                    <div className="col-6">
+                                        <label className="form-label">Year Level</label>
+                                        <select 
+                                            className="form-select" 
+                                            value={editDraft.yearLevel || ''} 
+                                            onChange={e => setEditDraft(prev => ({ ...prev, yearLevel: Number(e.target.value) }))}
+                                        >
+                                            <option value="">Select</option>
+                                            {[1,2,3,4].map(v => <option key={v} value={v}>{v}</option>)}
+                                        </select>
+                                    </div>
+                                    <div className="col-6">
+                                        <label className="form-label">Gender</label>
+                                        <select 
+                                            className="form-select" 
+                                            value={editDraft.gender || ''} 
+                                            onChange={e => setEditDraft(prev => ({ ...prev, gender: e.target.value as Gender }))}
+                                        >
+                                            <option value="">Select</option>
+                                            {(['Male','Female'] as Gender[]).map(g => <option key={g} value={g}>{g}</option>)}
+                                        </select>
+                                    </div>
+                                    <div className="col-6">
+                                        <label className="form-label">College</label>
+                                        <select 
+                                            className="form-select" 
+                                            value={editDraft.college || ''} 
+                                            onChange={e => setEditDraft(prev => ({ ...prev, college: e.target.value }))}
+                                        >
+                                            <option value="">Select</option>
+                                            {collegeOptions.map(c => <option key={c.code} value={c.code}>{c.name}</option>)}
+                                        </select>
+                                        {editDraft.college && (
+                                            <div className="form-text small">
+                                                Selected: {collegeDisplayNames[editDraft.college] || editDraft.college}
+                                            </div>
+                                        )}
+                                    </div>
+                                    <div className="col-6">
+                                        <label className="form-label">Program</label>
+                                        <select 
+                                            className="form-select" 
+                                            value={editDraft.program || ''} 
+                                            onChange={e => setEditDraft(prev => ({ ...prev, program: e.target.value }))} 
+                                            disabled={!editDraft.college}
+                                        >
+                                            <option value="">{editDraft.college ? 'Select' : 'Select College first'}</option>
+                                            {editProgramOptions.map(p => <option key={p.code} value={p.code}>{p.name}</option>)}
+                                        </select>
+                                        {editDraft.program && (
+                                            <div className="form-text small">
+                                                Selected: {programDisplayNames[editDraft.program] || editDraft.program}
+                                            </div>
+                                        )}
+                                    </div>
+                                    
+                                    {/* Avatar Section for Edit Modal */}
+                                    <div className="col-12">
+                                        <label className="form-label">Avatar</label>
+                                        
+                                        {/* Show current avatar */}
+                                        {editAvatarUrl && (
+                                            <div className="mb-3">
+                                                <div className="d-flex align-items-center gap-3">
+                                                    <img 
+                                                        src={editAvatarUrl} 
+                                                        alt="Current avatar" 
+                                                        style={{ 
+                                                            width: 60, 
+                                                            height: 60, 
+                                                            objectFit: 'cover', 
+                                                            borderRadius: 8,
+                                                            border: '2px solid #ddd'
+                                                        }} 
+                                                    />
+                                                    <div>
+                                                        <div className="text-success small mb-1">
+                                                            <i className="bi bi-check-circle-fill me-1"></i>
+                                                            Has avatar
+                                                        </div>
+                                                        <button 
+                                                            type="button" 
+                                                            className="btn btn-sm btn-outline-danger"
+                                                            onClick={onRemoveAvatar}
+                                                            disabled={isUploading}
+                                                        >
+                                                            <i className="bi bi-trash me-1"></i>
+                                                            Remove Avatar
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        )}
+                                        
+                                        {/* Avatar upload for editing */}
+                                        <div className="mb-3">
+                                            <input 
+                                                ref={editFileInputRef}
+                                                type="file" 
+                                                accept="image/*" 
+                                                className="form-control" 
+                                                onChange={(e) => {
+                                                    const file = e.target.files?.[0] || null
+                                                    if (file) {
+                                                        // Validate file before setting it
+                                                        const validationError = validateAvatarFile(file)
+                                                        if (validationError) {
+                                                            alert(validationError)
+                                                            // Clear the file input
+                                                            if (editFileInputRef.current) {
+                                                                editFileInputRef.current.value = ''
+                                                            }
+                                                            setEditSelectedFile(null)
+                                                            return
+                                                        }
+                                                    }
+                                                    setEditSelectedFile(file)
+                                                }}
+                                                disabled={isUploading}
+                                            />
+                                            <div className="form-text">
+                                                Select a new image to replace current avatar (optional)
+                                            </div>
+                                            
+                                            {editSelectedFile && (
+                                                <div className="mt-2 p-2 bg-light rounded">
+                                                    <div className="d-flex align-items-center gap-2">
+                                                        <i className="bi bi-file-earmark-image text-primary"></i>
+                                                        <span className="small">{editSelectedFile.name}</span>
+                                                        <span className="small text-muted">({Math.round(editSelectedFile.size / 1024)} KB)</span>
+                                                        <button 
+                                                            type="button"
+                                                            className="btn btn-sm btn-outline-secondary ms-auto"
+                                                            onClick={clearEditFileInput}
+                                                        >
+                                                            <i className="bi bi-x"></i>
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                            )}
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            <div className="modal-footer">
+                                <button 
+                                    type="button" 
+                                    className="btn btn-secondary" 
+                                    onClick={closeEditModal}
+                                    disabled={isUploading}
+                                >
+                                    Cancel
+                                </button>
+                                <button 
+                                    type="button" 
+                                    className="btn btn-warning" 
+                                    onClick={onEdit}
+                                    disabled={!canSubmitEdit || isUploading}
+                                >
+                                    {isUploading ? (
+                                        <>
+                                            <span className="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>
+                                            Updating...
+                                        </>
+                                    ) : 'Update Student'}
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Delete Confirmation Modal */}
+            {showDeleteModal && studentToDelete && (
+                <div className="modal fade show" style={{ display: 'block', backgroundColor: 'rgba(0,0,0,0.5)' }}>
+                    <div className="modal-dialog">
+                        <div className="modal-content">
+                            <div className="modal-header">
+                                <h5 className="modal-title text-danger">Confirm Deletion</h5>
+                                <button type="button" className="btn-close" onClick={closeDeleteModal}></button>
+                            </div>
+                            <div className="modal-body">
+                                <p>
+                                    Are you sure you want to delete student <strong>{studentToDelete.firstName} {studentToDelete.lastName}</strong> (ID: {studentToDelete.id})?
+                                </p>
+                                <p className="text-danger">
+                                    <i className="bi bi-exclamation-triangle-fill me-2"></i>
+                                    This action cannot be undone. This will also delete their avatar if it exists.
+                                </p>
+                            </div>
+                            <div className="modal-footer">
+                                <button 
+                                    type="button" 
+                                    className="btn btn-secondary" 
+                                    onClick={closeDeleteModal}
+                                    disabled={isUploading}
+                                >
+                                    Cancel
+                                </button>
+                                <button 
+                                    type="button" 
+                                    className="btn btn-danger" 
+                                    onClick={onDelete}
+                                    disabled={isUploading}
+                                >
+                                    {isUploading ? (
+                                        <>
+                                            <span className="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>
+                                            Deleting...
+                                        </>
+                                    ) : 'Delete Student'}
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     )
 }
