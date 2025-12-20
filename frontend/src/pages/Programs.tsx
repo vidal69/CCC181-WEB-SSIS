@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, useCallback } from 'react'
 import { listPrograms, createProgram, updateProgram, deleteProgram } from '../api/programs'
 import { listColleges } from '../api/colleges'
 
@@ -49,7 +49,15 @@ export default function ProgramManager() {
     programName: '',
     collegeCode: '',
   })
-  const [selectedRowIndex, setSelectedRowIndex] = useState<number | null>(null)
+  
+  // Modal states
+  const [showEditModal, setShowEditModal] = useState(false)
+  const [showDeleteModal, setShowDeleteModal] = useState(false)
+  const [programToEdit, setProgramToEdit] = useState<Program | null>(null)
+  const [programToDelete, setProgramToDelete] = useState<Program | null>(null)
+  
+  // Edit form state
+  const [editDraft, setEditDraft] = useState<Partial<Program>>({})
 
   const [searchField, setSearchField] = useState<SortKey>('programCode')
   const [searchQuery, setSearchQuery] = useState('')
@@ -114,7 +122,7 @@ export default function ProgramManager() {
   }
 
   // Function to refresh program list
-  const refreshProgramList = async () => {
+  const refreshProgramList = useCallback(async () => {
     try {
       const params: Record<string, any> = {
         page: pageClamped,
@@ -146,25 +154,37 @@ export default function ProgramManager() {
       const error = err as ApiError
       alert(error?.message || 'Failed to load programs')
     }
-  }
+  }, [pageClamped, sortKey, sortDir, searchField, searchQuery, filterCollege])
 
   // Fetch list from server whenever relevant params change
   useEffect(() => {
     refreshProgramList()
-  }, [page, sortKey, sortDir, searchField, searchQuery, filterCollege])
+  }, [page, sortKey, sortDir, searchField, searchQuery, filterCollege, refreshProgramList])
 
-  function handleSelectRow(indexOnPage: number) {
-    const p = programs[indexOnPage]
-    if (!p) return
-    console.log('Selected program:', p)
-    
-    setSelectedRowIndex(indexOnPage)
-    setDraft({ ...p })
+  // Function to open edit modal
+  const handleEditClick = (program: Program) => {
+    setProgramToEdit(program)
+    setEditDraft({ ...program })
+    setShowEditModal(true)
   }
 
-  function clearForm() {
-    setSelectedRowIndex(null)
-    setDraft({ programCode: '', programName: '', collegeCode: '' })
+  // Function to open delete modal
+  const handleDeleteClick = (program: Program) => {
+    setProgramToDelete(program)
+    setShowDeleteModal(true)
+  }
+
+  // Function to close edit modal
+  const closeEditModal = () => {
+    setShowEditModal(false)
+    setProgramToEdit(null)
+    setEditDraft({})
+  }
+
+  // Function to close delete modal
+  const closeDeleteModal = () => {
+    setShowDeleteModal(false)
+    setProgramToDelete(null)
   }
 
   async function onAdd() {
@@ -195,30 +215,26 @@ export default function ProgramManager() {
     }
   }
 
-  async function onUpdate() {
-    if (selectedRowIndex === null) {
-      alert('Select a program row to update.')
-      return
-    }
+  async function onEdit() {
+    if (!programToEdit) return
     
-    const errors = validateProgramDraft(draft)
+    const errors = validateProgramDraft(editDraft)
     if (errors.length) {
       alert(errors.join('\n'))
       return
     }
     
     try {
-      const orig = programs[selectedRowIndex]
-      console.log('Original program:', orig)
-      console.log('Draft updates:', draft)
+      console.log('Original program:', programToEdit)
+      console.log('Draft updates:', editDraft)
       
       // Prepare update payload - only include changed fields
       const updates: Partial<Program> = {}
-      if (draft.programCode && draft.programCode !== orig.programCode) updates.programCode = draft.programCode
-      if (draft.programName && draft.programName !== orig.programName) updates.programName = draft.programName
-      if (draft.collegeCode && draft.collegeCode !== orig.collegeCode) {
-        console.log('College changed from', orig.collegeCode, 'to', draft.collegeCode)
-        updates.collegeCode = draft.collegeCode
+      if (editDraft.programCode && editDraft.programCode !== programToEdit.programCode) updates.programCode = editDraft.programCode
+      if (editDraft.programName && editDraft.programName !== programToEdit.programName) updates.programName = editDraft.programName
+      if (editDraft.collegeCode && editDraft.collegeCode !== programToEdit.collegeCode) {
+        console.log('College changed from', programToEdit.collegeCode, 'to', editDraft.collegeCode)
+        updates.collegeCode = editDraft.collegeCode
       }
       
       console.log('Updates to send:', updates)
@@ -228,11 +244,11 @@ export default function ProgramManager() {
         return
       }
       
-      await updateProgram(orig.programCode, updates)
+      await updateProgram(programToEdit.programCode, updates)
       alert('Program updated successfully!')
       
       await refreshProgramList()
-      clearForm()
+      closeEditModal()
       
     } catch (err: unknown) {
       const error = err as ApiError
@@ -243,20 +259,14 @@ export default function ProgramManager() {
   }
 
   async function onDelete() {
-    if (selectedRowIndex === null) {
-      alert('Select a program row to delete.')
-      return
-    }
-    
-    if (!confirm('Are you sure you want to delete this program?')) return
+    if (!programToDelete) return
     
     try {
-      const orig = programs[selectedRowIndex]
-      await deleteProgram(orig.programCode)
+      await deleteProgram(programToDelete.programCode)
       alert('Program deleted successfully!')
       
       await refreshProgramList()
-      clearForm()
+      closeDeleteModal()
       
     } catch (err: unknown) {
       const error = err as ApiError
@@ -264,6 +274,10 @@ export default function ProgramManager() {
       alert(errorMessage)
       console.error('Delete program error:', err)
     }
+  }
+
+  function clearForm() {
+    setDraft({ programCode: '', programName: '', collegeCode: '' })
   }
 
   function onRefresh() {
@@ -279,9 +293,7 @@ export default function ProgramManager() {
   }
 
   const canSubmit = validateProgramDraft(draft).length === 0
-  const hasSelectedProgram = selectedRowIndex !== null
-
-  // REMOVED THE DUPLICATE DECLARATIONS HERE
+  const canSubmitEdit = validateProgramDraft(editDraft).length === 0
 
   useEffect(() => {
     function syncHeights() {
@@ -323,6 +335,29 @@ export default function ProgramManager() {
                     <input className="form-control" value={searchQuery} onChange={e => setSearchQuery(e.target.value)} />
                   </div>
                 </div>
+                
+                {/* College Filter */}
+                <div className="col-12">
+                  <label className="form-label">Filter by College</label>
+                  <select className="form-select" value={filterCollege} onChange={e => setFilterCollege(e.target.value)}>
+                    {filterCollegeOptions.map(option => 
+                      <option key={option.code} value={option.code}>{option.name}</option>
+                    )}
+                  </select>
+                </div>
+                
+                {/* Clear Filters Button */}
+                {filterCollege && (
+                  <div className="col-12">
+                    <button 
+                      className="btn btn-outline-secondary btn-sm w-100"
+                      onClick={() => setFilterCollege('')}
+                    >
+                      <i className="bi bi-x-circle me-1"></i>
+                      Clear Filter
+                    </button>
+                  </div>
+                )}
               </div>
             </div>
           </div>
@@ -330,6 +365,7 @@ export default function ProgramManager() {
           
           <div className="card frosted-glass mb-3">
             <div className="card-body">
+              <h5 className="card-title mb-3">Add New Program</h5>
               <div className="row g-3">
                 <div className="col-12">
                   <label className="form-label">Program Code</label>
@@ -362,20 +398,6 @@ export default function ProgramManager() {
                     Add
                   </button>
                   <button 
-                    className="btn btn-warning" 
-                    onClick={onUpdate} 
-                    disabled={selectedRowIndex === null || !canSubmit}
-                  >
-                    Update
-                  </button>
-                  <button 
-                    className="btn btn-danger" 
-                    onClick={onDelete} 
-                    disabled={selectedRowIndex === null}
-                  >
-                    Delete
-                  </button>
-                  <button 
                     className="btn btn-outline-secondary" 
                     onClick={clearForm}
                   >
@@ -388,20 +410,6 @@ export default function ProgramManager() {
                     <i className="bi bi-arrow-clockwise me-1"></i>
                     Refresh
                   </button>
-                </div>
-                
-                {/* Status Messages */}
-                <div className="col-12">
-                  {hasSelectedProgram && (
-                    <div className="alert alert-info py-2 mt-2 small">
-                      <div className="d-flex align-items-center">
-                        <i className="bi bi-book me-2"></i>
-                        <div>
-                          Editing: <strong>{draft.programName}</strong>
-                        </div>
-                      </div>
-                    </div>
-                  )}
                 </div>
               </div>
             </div>
@@ -431,23 +439,53 @@ export default function ProgramManager() {
                         </div>
                       </th>
                     ))}
+                    <th>Actions</th>
                   </tr>
                 </thead>
                 <tbody>
                   {filteredPrograms.map((p, idx) => (
-                    <tr key={p.programCode} 
-                        className={selectedRowIndex === idx ? 'table-primary' : ''} 
-                        onClick={() => handleSelectRow(idx)} 
-                        style={{ cursor: 'pointer' }}>
+                    <tr key={p.programCode} style={{ cursor: 'pointer' }}>
                       <td>{p.programCode}</td>
                       <td>{p.programName}</td>
-                      {/* Show College Code instead of College Name */}
                       <td>{p.collegeCode}</td>
+                      <td>
+                        <div className="d-flex gap-1">
+                          <button 
+                            className="btn btn-sm btn-outline-warning"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleEditClick(p);
+                            }}
+                            title="Edit program"
+                          >
+                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                              <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
+                              <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
+                            </svg>
+                          </button>
+                          <button 
+                            className="btn btn-sm btn-outline-danger"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleDeleteClick(p);
+                            }}
+                            title="Delete program"
+                          >
+                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                              <path d="M3 6h18"></path>
+                              <path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"></path>
+                              <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"></path>
+                              <line x1="10" y1="11" x2="10" y2="17"></line>
+                              <line x1="14" y1="11" x2="14" y2="17"></line>
+                            </svg>
+                          </button>
+                        </div>
+                      </td>
                     </tr>
                   ))}
                   {filteredPrograms.length === 0 && (
                     <tr>
-                      <td colSpan={3} className="text-center text-muted py-4">
+                      <td colSpan={4} className="text-center text-muted py-4">
                         <i className="bi bi-book display-6 d-block mb-2"></i>
                         No programs to display.
                       </td>
@@ -491,6 +529,112 @@ export default function ProgramManager() {
           </div>
         </div>
       </div>
+
+      {/* Edit Program Modal */}
+      {showEditModal && programToEdit && (
+        <div className="modal fade show" style={{ display: 'block', backgroundColor: 'rgba(0,0,0,0.5)' }}>
+          <div className="modal-dialog">
+            <div className="modal-content">
+              <div className="modal-header">
+                <h5 className="modal-title">Edit Program: {programToEdit.programName}</h5>
+                <button type="button" className="btn-close" onClick={closeEditModal}></button>
+              </div>
+              <div className="modal-body">
+                <div className="row g-3">
+                  <div className="col-12">
+                    <label className="form-label">Program Code</label>
+                    <input 
+                      className="form-control" 
+                      value={editDraft.programCode || ''} 
+                      onChange={e => setEditDraft(prev => ({ ...prev, programCode: e.target.value }))}
+                    />
+                  </div>
+                  <div className="col-12">
+                    <label className="form-label">Program Name</label>
+                    <input 
+                      className="form-control" 
+                      value={editDraft.programName || ''} 
+                      onChange={e => setEditDraft(prev => ({ ...prev, programName: e.target.value }))} 
+                    />
+                  </div>
+                  <div className="col-12">
+                    <label className="form-label">College</label>
+                    <select 
+                      className="form-select" 
+                      value={editDraft.collegeCode || ''} 
+                      onChange={e => setEditDraft(prev => ({ ...prev, collegeCode: e.target.value }))}
+                    >
+                      <option value="">Select</option>
+                      {collegeOptions.map(c => <option key={c.code} value={c.code}>{c.name}</option>)}
+                    </select>
+                    {editDraft.collegeCode && (
+                      <div className="form-text small">
+                        Selected: {collegeDisplayNames[editDraft.collegeCode] || editDraft.collegeCode}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+              <div className="modal-footer">
+                <button 
+                  type="button" 
+                  className="btn btn-secondary" 
+                  onClick={closeEditModal}
+                >
+                  Cancel
+                </button>
+                <button 
+                  type="button" 
+                  className="btn btn-warning" 
+                  onClick={onEdit}
+                  disabled={!canSubmitEdit}
+                >
+                  Update Program
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Confirmation Modal */}
+      {showDeleteModal && programToDelete && (
+        <div className="modal fade show" style={{ display: 'block', backgroundColor: 'rgba(0,0,0,0.5)' }}>
+          <div className="modal-dialog">
+            <div className="modal-content">
+              <div className="modal-header">
+                <h5 className="modal-title text-danger">Confirm Deletion</h5>
+                <button type="button" className="btn-close" onClick={closeDeleteModal}></button>
+              </div>
+              <div className="modal-body">
+                <p>
+                  Are you sure you want to delete program <strong>{programToDelete.programName}</strong> (Code: {programToDelete.programCode})?
+                </p>
+                <p className="text-danger">
+                  <i className="bi bi-exclamation-triangle-fill me-2"></i>
+                  This action cannot be undone.
+                </p>
+              </div>
+              <div className="modal-footer">
+                <button 
+                  type="button" 
+                  className="btn btn-secondary" 
+                  onClick={closeDeleteModal}
+                >
+                  Cancel
+                </button>
+                <button 
+                  type="button" 
+                  className="btn btn-danger" 
+                  onClick={onDelete}
+                >
+                  Delete Program
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
